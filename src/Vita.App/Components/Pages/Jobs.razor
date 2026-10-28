@@ -1,0 +1,575 @@
+@page "/jobs"
+@attribute [Authorize]
+@attribute [StreamRendering]
+@inject UserSession Session
+@inject ResumeStore ResumeStore
+@inject ApplicationStore Applications
+@inject JobBoardService JobBoard
+@inject ToastService Toasts
+@inject NavigationManager Nav
+
+<PageTitle>Vagas · Vita</PageTitle>
+
+<div class="page-head">
+    <div class="page-head-main">
+        <span class="eyebrow"><span class="dot"></span> Oportunidades com aderência</span>
+        <h1 class="page-title">Vagas que combinam com <em>você</em></h1>
+        <p class="page-sub">Buscamos em fontes públicas de vagas e calculamos a aderência com o seu currículo. Salve, acompanhe e adapte seu documento antes de aplicar.</p>
+    </div>
+    <div class="page-actions">
+        <button class="btn btn-ghost" @onclick="() => _onlySaved = !_onlySaved">
+            <Icon Name="star" Size="16" /> @(_onlySaved ? "Ver todas" : $"Salvas ({_saved.Count})")
+        </button>
+        <button class="btn btn-primary" @onclick="RunSearch" disabled="@_loading">
+            @if (_loading) { <span class="spinner spinner-sm"></span> } else { <Icon Name="refresh" Size="16" /> }
+            Atualizar
+        </button>
+    </div>
+</div>
+
+<div class="search-bar">
+    <div class="search-input">
+        <Icon Name="search" Size="16" />
+        <input @bind="_query" @bind:event="oninput" @onkeydown="OnSearchKey" placeholder="Cargo, competência ou palavra-chave" />
+    </div>
+    <div class="search-divider"></div>
+    <div class="search-input" style="max-width:230px">
+        <Icon Name="pin" Size="16" />
+        <input @bind="_location" @bind:event="oninput" @onkeydown="OnSearchKey" placeholder="Cidade ou remoto" />
+    </div>
+    <label class="switch" title="Somente vagas remotas">
+        <input type="checkbox" @bind="_remoteOnly" @bind:after="RunSearch" />
+        <span class="track"></span>
+        <span class="tiny">Remoto</span>
+    </label>
+    <button class="btn btn-primary btn-sm" @onclick="RunSearch" disabled="@_loading">
+        <Icon Name="search" Size="14" /> Buscar
+    </button>
+</div>
+
+@if (_loading)
+{
+    <div class="jobs-layout">
+        <div class="job-list">
+            @for (var i = 0; i < 5; i++)
+            {
+                <div class="job-skeleton"></div>
+            }
+        </div>
+        <aside class="side-panel">
+            <div class="job-skeleton" style="height:160px"></div>
+            <div class="job-skeleton" style="height:120px"></div>
+        </aside>
+    </div>
+}
+else
+{
+    @if (!string.IsNullOrWhiteSpace(_warning))
+    {
+        <div class="alert alert-warn" style="margin-top:14px">
+            <Icon Name="alert" Size="17" />
+            <span>@_warning</span>
+        </div>
+    }
+
+    <div class="jobs-layout">
+        <div>
+            <div class="jobs-toolbar">
+                <div>
+                    <strong>@(_onlySaved ? "Vagas salvas" : "Resultados")</strong>
+                    <span class="tiny muted">@(_onlySaved ? $"{_saved.Count} salvas" : $"{_results.Count} vagas · {_totalFetched} analisadas")</span>
+                </div>
+                @if (!_onlySaved && _fromNetwork)
+                {
+                    <span class="status-line"><span class="status-dot"></span> Fontes online</span>
+                }
+                else if (!_onlySaved)
+                {
+                    <span class="status-line"><span class="status-dot off"></span> Modo offline</span>
+                }
+            </div>
+
+            @if (_onlySaved)
+            {
+                @if (_saved.Count == 0)
+                {
+                    <div class="empty-state">
+                        <div class="orb"><Icon Name="star" Size="22" /></div>
+                        <h3>Nenhuma vaga salva ainda.</h3>
+                        <p>Use o botão de estrela nos resultados para guardar as vagas que você quer acompanhar.</p>
+                        <button class="btn btn-primary" @onclick="() => _onlySaved = false"><Icon Name="search" Size="16" /> Explorar vagas</button>
+                    </div>
+                }
+                else
+                {
+                    <div class="job-list">
+                        @foreach (var saved in _saved)
+                        {
+                            var posting = ToPosting(saved);
+                            var match = MatchFor(posting);
+                            <article class="card job-card">
+                                <div class="job-top">
+                                    <div class="job-logo">@Initial(saved.Company)</div>
+                                    <div class="job-main">
+                                        <button class="job-title job-title-btn" @onclick="() => OpenDetail(posting)">@saved.Title</button>
+                                        <div class="job-company">
+                                            <span>@saved.Company</span>
+                                            @if (!string.IsNullOrWhiteSpace(saved.Location))
+                                            {
+                                                <span>·</span><span>@saved.Location</span>
+                                            }
+                                            <span class="badge badge-outline">@saved.Source</span>
+                                        </div>
+                                    </div>
+                                    <div class="job-score @MatchTone(match.Score)">
+                                        <b>@match.Score%</b>
+                                        <span>aderência</span>
+                                    </div>
+                                </div>
+                                <p class="job-desc">@TextAnalysis.Truncate(saved.Description, 260)</p>
+                                <div class="job-foot">
+                                    <span class="tiny muted"><Icon Name="clock" Size="12" /> Salva @Human(saved.SavedAt)</span>
+                                    <div class="spacer"></div>
+                                    <button class="icon-btn danger" title="Remover vaga salva" @onclick="() => RemoveSaved(saved)">
+                                        <Icon Name="trash" Size="16" />
+                                    </button>
+                                    <button class="btn btn-ghost btn-sm" @onclick="() => OpenDetail(posting)">
+                                        <Icon Name="eye" Size="14" /> Detalhes
+                                    </button>
+                                    <button class="btn btn-soft btn-sm" @onclick="() => AddToTracker(posting, match.Score)">
+                                        <Icon Name="columns" Size="14" /> Acompanhar
+                                    </button>
+                                </div>
+                            </article>
+                        }
+                    </div>
+                }
+            }
+            else
+            {
+                @if (_results.Count == 0)
+                {
+                    <div class="empty-state">
+                        <div class="orb"><Icon Name="briefcase" Size="22" /></div>
+                        <h3>Nenhuma vaga encontrada com esses filtros.</h3>
+                        <p>Tente remover a localização, buscar por uma competência específica ou desativar o filtro de vagas remotas.</p>
+                        <button class="btn btn-ghost" @onclick="ClearFilters"><Icon Name="refresh" Size="16" /> Limpar filtros</button>
+                    </div>
+                }
+                else
+                {
+                    <div class="job-list">
+                        @foreach (var result in _results)
+                        {
+                            var job = result.Job;
+                            <article class="card job-card card-hover">
+                                <div class="job-top">
+                                    <div class="job-logo">@Initial(job.Company)</div>
+                                    <div class="job-main">
+                                        <button class="job-title job-title-btn" @onclick="() => OpenDetail(job)">@job.Title</button>
+                                        <div class="job-company">
+                                            <span>@job.Company</span>
+                                            @if (!string.IsNullOrWhiteSpace(job.Location))
+                                            {
+                                                <span>·</span><span><Icon Name="pin" Size="11" /> @job.Location</span>
+                                            }
+                                            <span class="badge badge-outline">@job.Source</span>
+                                            @if (job.Remote)
+                                            {
+                                                <span class="badge badge-soft">Remoto</span>
+                                            }
+                                        </div>
+                                    </div>
+                                    <div class="job-score @MatchTone(result.Match.Score)">
+                                        <b>@result.Match.Score%</b>
+                                        <span>aderência</span>
+                                    </div>
+                                </div>
+                                <p class="job-desc">@TextAnalysis.Truncate(job.Description, 280)</p>
+                                @if (job.Tags.Count > 0)
+                                {
+                                    <div class="job-tags">
+                                        @foreach (var tag in job.Tags.Take(5))
+                                        {
+                                            <span class="chip">@tag</span>
+                                        }
+                                    </div>
+                                }
+                                <div class="job-foot">
+                                    <span class="tiny muted">@(job.PublishedAt is null ? "Publicada recentemente" : "Publicada " + Human(job.PublishedAt.Value))</span>
+                                    <div class="spacer"></div>
+                                    <button class="icon-btn @(IsSaved(job) ? "saved" : "")" title="@(IsSaved(job) ? "Remover das salvas" : "Salvar vaga")" @onclick="() => ToggleSave(job, result.Match.Score)">
+                                        <Icon Name="star" Size="17" />
+                                    </button>
+                                    <button class="btn btn-ghost btn-sm" @onclick="() => OpenDetail(job)">
+                                        <Icon Name="eye" Size="14" /> Detalhes
+                                    </button>
+                                    <button class="btn btn-accent btn-sm" @onclick="() => AddToTracker(job, result.Match.Score)">
+                                        <Icon Name="plus" Size="14" /> Acompanhar
+                                    </button>
+                                </div>
+                            </article>
+                        }
+                    </div>
+                }
+            }
+        </div>
+
+        <aside class="side-panel">
+            <section class="card card-pad">
+                <div class="side-title"><Icon Name="file" Size="14" /> Currículo base</div>
+                @if (_resumes.Count == 0)
+                {
+                    <p class="tiny muted" style="line-height:1.55">Crie um currículo para calcular a aderência das vagas.</p>
+                    <a class="btn btn-primary btn-sm btn-block" style="margin-top:10px" href="/resumes?new=1">
+                        <Icon Name="plus" Size="14" /> Criar currículo
+                    </a>
+                }
+                else
+                {
+                    <select class="select" @bind="_resumeId" @bind:after="OnResumeChanged">
+                        @foreach (var resume in _resumes)
+                        {
+                            <option value="@resume.Id">@resume.Title</option>
+                        }
+                    </select>
+                    @if (_score.Total > 0)
+                    {
+                        <div class="match-summary">
+                            <div class="row-between">
+                                <span class="tiny muted">Nota do currículo</span>
+                                <span class="score-pill @ScoreTone(_score.Total)"><b>@_score.Total</b> / 100</span>
+                            </div>
+                            <div class="row-between" style="margin-top:7px">
+                                <span class="tiny muted">Melhor aderência</span>
+                                <span class="score-pill @MatchTone(_bestMatch)"><b>@_bestMatch%</b></span>
+                            </div>
+                        </div>
+                        <a class="btn btn-ghost btn-sm btn-block" style="margin-top:11px" href="@($"/resumes/{_resumeId}/edit")">
+                            <Icon Name="pencil" Size="14" /> Revisar currículo
+                        </a>
+                    }
+                }
+            </section>
+
+            <section class="card card-pad">
+                <div class="side-title"><Icon Name="sparkles" Size="14" /> Como ler a nota</div>
+                <p class="tiny muted" style="line-height:1.6">A aderência considera o título da vaga, as competências em comum e o seu nível de senioridade. Acima de 80% vale adaptar e aplicar.</p>
+                <div class="match-legend">
+                    <span><i style="background:var(--accent)"></i> 80%+ forte</span>
+                    <span><i style="background:var(--sun)"></i> 60–79% parcial</span>
+                    <span><i style="background:var(--clay)"></i> abaixo de 60%</span>
+                </div>
+            </section>
+
+            <section class="card card-pad" style="background:linear-gradient(150deg,#fff,#FBF7EE)">
+                <div class="side-title"><Icon Name="globe" Size="14" /> Fontes de vagas</div>
+                <p class="tiny muted" style="line-height:1.6">Buscamos em Arbeitnow e Remotive. Se uma fonte falhar, os resultados da outra continuam disponíveis. Nada do seu currículo é enviado às fontes.</p>
+            </section>
+        </aside>
+    </div>
+}
+
+@if (_detailJob is not null)
+{
+    <div class="drawer-scrim" @onclick="CloseDetail"></div>
+    <aside class="drawer drawer-wide">
+        <div class="drawer-head">
+            <div class="job-logo">@Initial(_detailJob.Company)</div>
+            <div style="min-width:0">
+                <h2 style="line-height:1.2">@_detailJob.Title</h2>
+                <span class="tiny muted">@_detailJob.Company @(string.IsNullOrWhiteSpace(_detailJob.Location) ? "" : "· " + _detailJob.Location)</span>
+            </div>
+            <button class="icon-btn" @onclick="CloseDetail" aria-label="Fechar"><Icon Name="x" Size="18" /></button>
+        </div>
+        <div class="drawer-body">
+            <div class="row-wrap">
+                <span class="score-pill @MatchTone(_detailMatch.Score)"><b>@_detailMatch.Score%</b> de aderência</span>
+                @if (_detailJob.Remote)
+                {
+                    <span class="badge badge-soft">Remoto</span>
+                }
+                <span class="badge badge-outline">@_detailJob.Source</span>
+                @if (!string.IsNullOrWhiteSpace(_detailJob.Salary))
+                {
+                    <span class="badge badge-sun">@_detailJob.Salary</span>
+                }
+                @if (_detailJob.PublishedAt is { } published)
+                {
+                    <span class="chip"><Icon Name="clock" Size="12" /> @Human(published)</span>
+                }
+            </div>
+
+            <div class="alert alert-neutral">
+                <Icon Name="target" Size="17" />
+                <span>@_detailMatch.Rationale</span>
+            </div>
+
+            @if (_detailMatch.Matched.Count > 0)
+            {
+                <div>
+                    <span class="muted-label">Competências em comum</span>
+                    <div class="chip-row" style="margin-top:7px">
+                        @foreach (var item in _detailMatch.Matched.Take(12))
+                        {
+                            <span class="chip match"><Icon Name="check" Size="11" /> @item</span>
+                        }
+                    </div>
+                </div>
+            }
+
+            @if (_detailMatch.Missing.Count > 0)
+            {
+                <div>
+                    <span class="muted-label">Aparecem na vaga, mas não no currículo</span>
+                    <div class="chip-row" style="margin-top:7px">
+                        @foreach (var item in _detailMatch.Missing.Take(10))
+                        {
+                            <span class="chip missing">@item</span>
+                        }
+                    </div>
+                </div>
+            }
+
+            <div>
+                <span class="muted-label">Descrição da vaga</span>
+                <div class="job-description">@_detailJob.Description</div>
+            </div>
+        </div>
+        <div class="drawer-foot">
+            <button class="btn btn-ghost btn-sm" @onclick="() => ToggleSaveDetail()">
+                <Icon Name="star" Size="14" /> @(_detailSaved ? "Remover das salvas" : "Salvar vaga")
+            </button>
+            <div class="spacer"></div>
+            @if (!string.IsNullOrWhiteSpace(_detailJob.Url))
+            {
+                <a class="btn btn-ghost btn-sm" href="@_detailJob.Url" target="_blank" rel="noopener">
+                    <Icon Name="external" Size="14" /> Abrir original
+                </a>
+            }
+            <button class="btn btn-soft btn-sm" @onclick="() => TailorForDetail()" disabled="@(_resumeId is null)">
+                <Icon Name="wand" Size="14" /> Adaptar currículo
+            </button>
+            <button class="btn btn-accent btn-sm" @onclick="() => AddToTrackerDetail()">
+                <Icon Name="plus" Size="14" /> Acompanhar
+            </button>
+        </div>
+    </aside>
+}
+
+@code {
+    private AppUser? _user;
+    private List<ResumeEntity> _resumes = new();
+    private List<SavedJob> _saved = new();
+    private List<JobResult> _results = new();
+    private HashSet<string> _savedIds = new(StringComparer.OrdinalIgnoreCase);
+    private HashSet<string> _tracked = new(StringComparer.OrdinalIgnoreCase);
+    private Guid? _resumeId;
+    private ResumeDocument? _document;
+    private ResumeScore _score = new(0, "—", "", Array.Empty<ScoreCategory>(), Array.Empty<ScoreIssue>(), null);
+
+    private string _query = string.Empty;
+    private string _location = string.Empty;
+    private bool _remoteOnly;
+    private bool _onlySaved;
+    private bool _loading = true;
+    private string? _warning;
+    private bool _fromNetwork;
+    private int _totalFetched;
+
+    private JobPosting? _detailJob;
+    private JobMatch _detailMatch = new(0, new(), new(), "");
+    private bool _detailSaved;
+
+    private int _bestMatch => _results.Count == 0 ? 0 : _results.Max(r => r.Match.Score);
+
+    protected override async Task OnInitializedAsync()
+    {
+        _user = await Session.GetUserAsync();
+        if (_user is null) return;
+
+        _resumes = await ResumeStore.ListAsync(_user.Id);
+        var preferred = _resumes.FirstOrDefault(r => r.IsDefault) ?? _resumes.FirstOrDefault();
+        _resumeId = preferred?.Id;
+        if (preferred is not null)
+        {
+            _document = Json.Deserialize<ResumeDocument>(preferred.DataJson);
+            if (_document is not null) _score = ResumeScorer.Analyze(_document);
+        }
+
+        await LoadSavedAsync();
+        var applications = await Applications.ListAsync(_user.Id);
+        _tracked = applications.Select(a => Key(a.Url, a.Position)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        await RunSearch();
+    }
+
+    private async Task LoadSavedAsync()
+    {
+        if (_user is null) return;
+        _saved = await JobBoard.ListSavedAsync(_user.Id);
+        _savedIds = _saved.Select(s => s.ExternalId).Where(id => id.Length > 0).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        _savedIds.UnionWith(_saved.Select(s => s.Url).Where(url => url.Length > 0));
+    }
+
+    private async Task RunSearch()
+    {
+        if (_user is null) return;
+        _loading = true;
+        _warning = null;
+        try
+        {
+            var result = await JobBoard.SearchAsync(_query, _location, _remoteOnly, _document);
+            _results = result.Items;
+            _fromNetwork = result.FromNetwork;
+            _warning = result.Warning;
+            _totalFetched = result.TotalFetched;
+        }
+        catch (Exception)
+        {
+            _results = new List<JobResult>();
+            _warning = "Não foi possível carregar vagas agora. Verifique sua conexão e tente novamente.";
+            _fromNetwork = false;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task OnSearchKey(KeyboardEventArgs args)
+    {
+        if (args.Key == "Enter") await RunSearch();
+    }
+
+    private async Task ClearFilters()
+    {
+        _query = string.Empty;
+        _location = string.Empty;
+        _remoteOnly = false;
+        await RunSearch();
+    }
+
+    private void OnResumeChanged()
+    {
+        var entity = _resumes.FirstOrDefault(r => r.Id == _resumeId);
+        _document = entity is null ? null : Json.Deserialize<ResumeDocument>(entity.DataJson);
+        _score = _document is null ? new ResumeScore(0, "—", "", Array.Empty<ScoreCategory>(), Array.Empty<ScoreIssue>(), null) : ResumeScorer.Analyze(_document);
+        _results = _results
+            .Select(r => r with { Match = MatchFor(r.Job) })
+            .OrderByDescending(r => r.Match.Score)
+            .ToList();
+    }
+
+    private JobMatch MatchFor(JobPosting job) => _document is null
+        ? new JobMatch(0, new List<string>(), new List<string>(), "Selecione um currículo para calcular a aderência.")
+        : JobMatcher.Score(_document, job.Title, job.Description, job.Location);
+
+    private bool IsSaved(JobPosting job) =>
+        (job.ExternalId.Length > 0 && _savedIds.Contains(job.ExternalId)) ||
+        (job.Url.Length > 0 && _savedIds.Contains(job.Url));
+
+    private async Task ToggleSave(JobPosting job, int score)
+    {
+        if (_user is null) return;
+        if (IsSaved(job))
+        {
+            await JobBoard.RemoveSavedJobAsync(_user.Id, job.ExternalId);
+            Toasts.Info("Vaga removida das salvas.");
+        }
+        else
+        {
+            await JobBoard.SaveJobAsync(_user.Id, job, score);
+            Toasts.Success("Vaga salva. Você encontra tudo em Vagas salvas.");
+        }
+        await LoadSavedAsync();
+    }
+
+    private async Task RemoveSaved(SavedJob saved)
+    {
+        if (_user is null) return;
+        await JobBoard.RemoveSavedJobAsync(_user.Id, saved.ExternalId);
+        await LoadSavedAsync();
+        Toasts.Info("Vaga removida das salvas.");
+    }
+
+    private void OpenDetail(JobPosting job)
+    {
+        _detailJob = job;
+        _detailMatch = MatchFor(job);
+        _detailSaved = IsSaved(job);
+    }
+
+    private void CloseDetail() => _detailJob = null;
+
+    private async Task ToggleSaveDetail()
+    {
+        if (_detailJob is null) return;
+        await ToggleSave(_detailJob, _detailMatch.Score);
+        _detailSaved = IsSaved(_detailJob);
+    }
+
+    private async Task AddToTracker(JobPosting job, int score)
+    {
+        if (_user is null) return;
+        if (_tracked.Contains(Key(job.Url, job.Title)))
+        {
+            Toasts.Info("Essa vaga já está no seu pipeline de candidaturas.");
+            return;
+        }
+        await Applications.AddFromJobAsync(_user.Id, job.Company, job.Title, job.Location, job.Url,
+            job.Source, job.Description, score, ApplicationStatuses.Saved);
+        _tracked.Add(Key(job.Url, job.Title));
+        Toasts.Success("Adicionada ao pipeline. Ajuste o status em Candidaturas.");
+    }
+
+    private async Task AddToTrackerDetail()
+    {
+        if (_detailJob is null) return;
+        await AddToTracker(_detailJob, _detailMatch.Score);
+    }
+
+    private void TailorForDetail()
+    {
+        if (_detailJob is null || _resumeId is null) return;
+        Nav.NavigateTo(TailorUrl(_detailJob));
+    }
+
+    private string TailorUrl(JobPosting job)
+    {
+        var jobText = TextAnalysis.Truncate(job.Description, 1400);
+        return $"/resumes/{_resumeId}/edit?tailor=1&role={Uri.EscapeDataString(job.Title)}&company={Uri.EscapeDataString(job.Company)}&job={Uri.EscapeDataString(jobText)}";
+    }
+
+    private static string Key(string? url, string? position) => $"{url}|{position}";
+
+    private static JobPosting ToPosting(SavedJob saved) => new(
+        saved.ExternalId,
+        saved.Title,
+        saved.Company,
+        saved.Location,
+        saved.Url,
+        saved.Description,
+        saved.Source,
+        string.Empty,
+        saved.SavedAt,
+        TextAnalysis.ContainsKeyword(saved.Location, "remote") || TextAnalysis.ContainsKeyword(saved.Location, "remoto"),
+        Array.Empty<string>());
+
+    private static string Initial(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? "?" : value.Trim()[..1].ToUpperInvariant();
+
+    private static string Human(DateTime value)
+    {
+        var days = (DateTime.UtcNow - value).TotalDays;
+        return days switch
+        {
+            < 1 => "hoje",
+            < 2 => "ontem",
+            < 30 => $"há {(int)days} dias",
+            _ => value.ToString("d MMM", new CultureInfo("pt-BR"))
+        };
+    }
+
+    private static string MatchTone(int score) => score >= 80 ? "" : score >= 60 ? "warn" : "bad";
+    private static string ScoreTone(int score) => score >= 80 ? "" : score >= 60 ? "warn" : "bad";
+}

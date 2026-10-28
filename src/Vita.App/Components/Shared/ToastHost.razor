@@ -1,0 +1,34 @@
+@inject ToastService Toasts
+@implements IDisposable
+
+<div class="toast-stack" aria-live="polite">
+    @foreach (var toast in _messages)
+    {
+        <div @key="toast.Id" class="toast toast-@toast.Type">
+            <span class="toast-icon">
+                <Icon Name="@(toast.Type == "error" ? "alert" : toast.Type == "info" ? "info" : "check")" Size="16" />
+            </span>
+            <span>@toast.Text</span>
+        </div>
+    }
+</div>
+
+@code {
+    private readonly List<ToastMessage> _messages = new();
+
+    protected override void OnInitialized() => Toasts.OnShow += HandleToast;
+
+    private void HandleToast(ToastMessage message)
+    {
+        _ = InvokeAsync(async () =>
+        {
+            _messages.Add(message);
+            StateHasChanged();
+            await Task.Delay(4200);
+            _messages.RemoveAll(m => m.Id == message.Id);
+            StateHasChanged();
+        });
+    }
+
+    public void Dispose() => Toasts.OnShow -= HandleToast;
+}

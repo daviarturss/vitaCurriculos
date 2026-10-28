@@ -1,0 +1,179 @@
+@page "/login"
+@layout AuthLayout
+@attribute [AllowAnonymous]
+@using Microsoft.AspNetCore.Components.Web
+@inject IJSRuntime JS
+@inject NavigationManager Nav
+@inject AuthService Auth
+
+<PageTitle>Entrar · Vita</PageTitle>
+
+<section class="auth-grid">
+    <div class="auth-form-side">
+        <div class="auth-form-card">
+            <h2>@(_profiles.Count == 0 ? "Bem-vindo à Vita." : "Quem está usando a Vita?")</h2>
+            <p class="auth-sub">
+                @(_profiles.Count == 0
+                    ? "Este é o primeiro acesso neste computador. Digite seu nome para criar seu perfil local."
+                    : "Escolha seu perfil ou digite outro nome. Cada nome tem uma pasta separada, com currículos e dados próprios.")
+            </p>
+
+            @if (!string.IsNullOrWhiteSpace(_error))
+            {
+                <div class="alert alert-error">
+                    <Icon Name="alert" Size="17" />
+                    <span>@_error</span>
+                </div>
+            }
+
+            @if (_profiles.Count > 0)
+            {
+                <div class="profile-list">
+                    @foreach (var profile in _profiles)
+                    {
+                        <button class="profile-option" @onclick="() => UseProfile(profile.Name)" disabled="@_busy">
+                            <span class="avatar">@Initials(profile.Name)</span>
+                            <span class="profile-option-main">
+                                <strong>@profile.Name</strong>
+                                <em>@profile.Slug</em>
+                            </span>
+                            <Icon Name="arrow-right" Size="16" />
+                        </button>
+                    }
+                </div>
+                <div class="auth-divider"><span>ou use outro nome</span></div>
+            }
+
+            <div class="form-stack">
+                <label class="field">
+                    <span>Nome do perfil</span>
+                    <input type="text" @bind="_name" placeholder="Como você quer ser chamado" autocomplete="name"
+                           @onkeydown="HandleKeyDown" autofocus />
+                </label>
+
+                <button class="btn btn-primary btn-block btn-lg" @onclick="Submit" disabled="@_busy">
+                    @if (_busy)
+                    {
+                        <span class="spinner spinner-sm"></span>
+                        <span>Abrindo seu espaço…</span>
+                    }
+                    else
+                    {
+                        <span>@(_profiles.Count == 0 ? "Criar meu perfil" : "Entrar com este nome")</span>
+                        <Icon Name="arrow-right" Size="17" />
+                    }
+                </button>
+            </div>
+
+            <p class="auth-hint">
+                <Icon Name="save" Size="13" />
+                Os dados ficam em <code>App_Data/perfis/&lt;nome&gt;</code>. Para outra pessoa usar o mesmo computador,
+                basta entrar com outro nome: ela começa com um espaço vazio.
+            </p>
+        </div>
+
+        <p class="auth-local-note">
+            <Icon Name="save" Size="14" />
+            Tudo fica no seu computador. Você pode exportar ou apagar seus dados a qualquer momento.
+        </p>
+    </div>
+
+    <aside class="auth-hero">
+        <div class="auth-hero-glow"></div>
+        <div class="auth-hero-inner">
+            <span class="eyebrow light">Currículo · IA · vagas</span>
+            <h1>Menos silêncio.<br /><em>Mais entrevistas.</em></h1>
+            <p class="auth-hero-text">
+                A Vita mostra o que está travando a triagem do seu currículo, adapta cada candidatura
+                para a vaga certa e conversa com você até o texto ficar do seu jeito.
+            </p>
+
+            <ul class="auth-features">
+                <li><span class="check"><Icon Name="check" Size="13" /></span> Análise ATS com nota e plano de correção</li>
+                <li><span class="check"><Icon Name="check" Size="13" /></span> Assistente que edita o currículo com você</li>
+                <li><span class="check"><Icon Name="check" Size="13" /></span> Vagas compatíveis e acompanhamento de candidaturas</li>
+            </ul>
+
+            <p class="auth-hero-foot">
+                Feito para rodar no seu computador. Seu currículo não é usado para treinar modelos.
+            </p>
+        </div>
+    </aside>
+</section>
+
+@code {
+    private string _name = string.Empty;
+    private bool _busy;
+    private string? _error;
+    private string _returnUrl = "/";
+    private IReadOnlyList<ProfileInfo> _profiles = Array.Empty<ProfileInfo>();
+
+    [SupplyParameterFromQuery(Name = "returnUrl")]
+    public string? ReturnUrl { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        _returnUrl = SafeReturn(ReturnUrl);
+        _profiles = await Auth.ListProfilesAsync();
+    }
+
+    private async Task UseProfile(string name)
+    {
+        _name = name;
+        await Submit();
+    }
+
+    private static string SafeReturn(string? value) =>
+        !string.IsNullOrWhiteSpace(value) && value.StartsWith('/') && !value.StartsWith("//") ? value : "/";
+
+    private async Task Submit()
+    {
+        if (_busy) return;
+        _error = null;
+
+        if (string.IsNullOrWhiteSpace(_name) || _name.Trim().Length < 2)
+        {
+            _error = "Digite pelo menos 2 caracteres no nome do perfil.";
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            var payload = new Dictionary<string, string> { ["name"] = _name.Trim() };
+            var result = await JS.InvokeAsync<AuthResult>("vita.postForm", "/auth/login", payload);
+            if (result is null || !result.ok)
+            {
+                _error = result?.error ?? "Não foi possível abrir o perfil. Tente novamente.";
+                _busy = false;
+                return;
+            }
+            Nav.NavigateTo(_returnUrl, forceLoad: true);
+        }
+        catch (Exception)
+        {
+            _error = "Falha de comunicação com o servidor local. Tente novamente.";
+            _busy = false;
+        }
+    }
+
+    private async Task HandleKeyDown(KeyboardEventArgs args)
+    {
+        if (args.Key == "Enter") await Submit();
+    }
+
+    private static string Initials(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return "V";
+        var parts = name.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        return parts.Length == 1
+            ? parts[0][..1].ToUpperInvariant()
+            : (parts[0][..1] + parts[^1][..1]).ToUpperInvariant();
+    }
+
+    public sealed class AuthResult
+    {
+        public bool ok { get; set; }
+        public string? error { get; set; }
+    }
+}

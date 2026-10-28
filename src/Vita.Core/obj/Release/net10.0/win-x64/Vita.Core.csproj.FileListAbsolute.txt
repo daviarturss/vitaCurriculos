@@ -1,0 +1,4 @@
+E:\Projetonovo\vita\src\Vita.Core\obj\Release\net10.0\win-x64\Vita.Core.GeneratedMSBuildEditorConfig.editorconfig
+E:\Projetonovo\vita\src\Vita.Core\obj\Release\net10.0\win-x64\Vita.Core.AssemblyInfoInputs.cache
+E:\Projetonovo\vita\src\Vita.Core\obj\Release\net10.0\win-x64\Vita.Core.AssemblyInfo.cs
+E:\Projetonovo\vita\src\Vita.Core\obj\Release\net10.0\win-x64\Vita.Core.csproj.CoreCompileInputs.cache

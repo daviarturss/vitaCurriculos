@@ -1,0 +1,393 @@
+@page "/ats"
+@attribute [Authorize]
+@inject UserSession Session
+@inject ResumeStore ResumeStore
+@inject ImportService Importer
+@inject AiAssistantService Ai
+@inject ToastService Toasts
+@inject NavigationManager Nav
+
+<PageTitle>Análise ATS · Vita</PageTitle>
+
+<div class="page-head">
+    <div class="page-head-main">
+        <span class="eyebrow"><span class="dot"></span> Triagem automática</span>
+        <h1 class="page-title">Seu currículo passa pelo <em>ATS?</em></h1>
+        <p class="page-sub">Veja a nota por categoria, as palavras-chave que faltam e o que corrigir primeiro. A análise funciona mesmo sem IA.</p>
+    </div>
+    <div class="page-actions">
+        @if (_resumeId is not null)
+        {
+            <a class="btn btn-ghost" href="@($"/resumes/{_resumeId}/edit")">
+                <Icon Name="pencil" Size="16" /> Abrir editor
+            </a>
+            <a class="btn btn-primary" href="@($"/resumes/{_resumeId}/edit?tailor=1")">
+                <Icon Name="target" Size="16" /> Adaptar à vaga
+            </a>
+        }
+    </div>
+</div>
+
+@if (_loading)
+{
+    <div class="page-loader"><span class="spinner"></span></div>
+}
+else
+{
+    <div class="segmented" style="margin-bottom:16px">
+        <button class="@(_mode == "resume" ? "active" : "")" @onclick='() => SetMode("resume")'>Currículo da Vita</button>
+        <button class="@(_mode == "text" ? "active" : "")" @onclick='() => SetMode("text")'>Colar currículo em texto</button>
+    </div>
+
+    @if (_mode == "resume" && _resumes.Count == 0)
+    {
+        <div class="empty-state">
+            <div class="orb"><Icon Name="file" Size="22" /></div>
+            <h3>Nenhum currículo para analisar.</h3>
+            <p>Crie seu currículo ou importe um arquivo. A Vita já calcula a nota enquanto você edita.</p>
+            <a class="btn btn-primary" href="/resumes?new=1"><Icon Name="plus" Size="16" /> Criar currículo</a>
+        </div>
+    }
+    else
+    {
+        <div class="card card-pad" style="margin-bottom:16px">
+            <div class="search-bar" style="box-shadow:none;border:0;padding:0">
+                @if (_mode == "resume")
+                {
+                    <div class="search-input" style="flex:0 0 240px">
+                        <Icon Name="file" Size="16" />
+                        <select class="select" style="border:0;padding-left:30px" @bind="_resumeId" @bind:after="SelectResume">
+                            @foreach (var resume in _resumes)
+                            {
+                                <option value="@resume.Id">@resume.Title</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="search-divider"></div>
+                }
+                <div class="search-input">
+                    <Icon Name="target" Size="16" />
+                    <input @bind="_job" @bind:event="oninput" placeholder="Cole a descrição da vaga para medir aderência (opcional)" />
+                </div>
+                @if (!string.IsNullOrWhiteSpace(_job))
+                {
+                    <button class="icon-btn" title="Limpar vaga" @onclick="ClearJob"><Icon Name="x" Size="16" /></button>
+                }
+                <button class="btn btn-primary btn-sm" @onclick="Analyze" disabled="@_analyzing">
+                    @if (_analyzing) { <span class="spinner spinner-sm"></span> } else { <Icon Name="search" Size="14" /> }
+                    Analisar
+                </button>
+            </div>
+        </div>
+
+        @if (_mode == "text")
+        {
+            <div class="card card-pad" style="margin-bottom:16px">
+                <div class="section-head">
+                    <h2>Cole seu currículo</h2>
+                    <span class="tiny muted">@TextAnalysis.WordCount(_text) palavras</span>
+                </div>
+                <textarea class="textarea checker-input" @bind="_text" @bind:event="oninput" placeholder="Cole aqui o texto do currículo. A Vita avalia estrutura, contato, bullets, números e aderência à vaga."></textarea>
+                <div class="row-wrap" style="margin-top:10px">
+                    <button class="btn btn-primary btn-sm" @onclick="Analyze"><Icon Name="search" Size="14" /> Calcular nota</button>
+                    <button class="btn btn-ghost btn-sm" @onclick="CreateFromText" disabled="@(_createBusy || _text.Length < 40)">
+                        @if (_createBusy) { <span class="spinner spinner-sm spinner-dark"></span> } else { <Icon Name="plus" Size="14" /> }
+                        Criar currículo a partir do texto
+                    </button>
+                    <span class="hint-ai"><Icon Name="info" Size="12" /> Nada é enviado para fora deste computador.</span>
+                </div>
+            </div>
+        }
+
+        @if (_currentScore is not null)
+        {
+            <div class="ats-layout">
+                <aside class="ats-summary">
+                    <ScoreRing Value="_currentScore.Total" Size="128" Label="/ 100" />
+                    <h2>@_currentScore.Label</h2>
+                    <p class="ats-verdict">@_currentScore.Verdict</p>
+
+                    <div class="ats-cats">
+                        @foreach (var category in _currentScore.Categories)
+                        {
+                            <div class="ats-cat">
+                                <div class="ats-cat-row"><span>@category.Name</span><b>@category.Score/@category.Max</b></div>
+                                <div class="ats-cat-track">
+                                    <div class="ats-cat-fill @CatTone(category)" style="width:@(Percent(category))%"></div>
+                                </div>
+                            </div>
+                        }
+                    </div>
+
+                    <div class="ats-meta">
+                        <div><strong>@TextAnalysis.WordCount(_mode == "resume" ? _document?.ToPlainText() : _text)</strong><span>palavras</span></div>
+                        <div><strong>@_currentScore.Issues.Count</strong><span>pontos</span></div>
+                        <div><strong>@(_currentScore.Coverage?.Percent ?? 0)%</strong><span>aderência</span></div>
+                    </div>
+                </aside>
+
+                <div class="stack">
+                    @if (_currentScore.Coverage is { Keywords.Count: > 0 } coverage)
+                    {
+                        <section class="card card-pad">
+                            <div class="section-head">
+                                <h2>Palavras-chave da vaga</h2>
+                                <span class="badge @(coverage.Percent >= 70 ? "badge-soft" : coverage.Percent >= 45 ? "badge-sun" : "badge-clay")">@coverage.Percent% de cobertura</span>
+                            </div>
+                            <p class="small muted" style="margin-bottom:10px">Termos que o ATS e o recrutador esperam encontrar. Inclua apenas o que você realmente domina.</p>
+                            <div class="chip-row">
+                                @foreach (var keyword in coverage.Matched)
+                                {
+                                    <span class="chip match"><Icon Name="check" Size="11" /> @keyword</span>
+                                }
+                                @foreach (var keyword in coverage.Missing)
+                                {
+                                    <span class="chip missing">@keyword</span>
+                                }
+                            </div>
+                        </section>
+                    }
+
+                    <section class="card card-pad">
+                        <div class="section-head">
+                            <h2>O que corrigir</h2>
+                            <button class="btn btn-accent btn-sm" @onclick="RunAiReview" disabled="@_aiBusy">
+                                @if (_aiBusy) { <span class="spinner spinner-sm"></span> } else { <Icon Name="sparkles" Size="14" /> }
+                                Revisão com IA
+                            </button>
+                        </div>
+
+                        @if (_aiError is not null)
+                        {
+                            <div class="alert alert-error" style="margin-bottom:10px"><Icon Name="alert" Size="16" /><span>@_aiError</span></div>
+                        }
+
+                        @if (_aiBusy)
+                        {
+                            <div class="ai-working">
+                                <span class="spinner"></span>
+                                <div><strong>Lendo seu currículo…</strong><span>Comparando com boas práticas de ATS e com a vaga.</span></div>
+                            </div>
+                        }
+
+                        @if (_review.Count > 0)
+                        {
+                            <div class="ai-suggestions">
+                                <span class="eyebrow"><Icon Name="sparkles" Size="12" /> Sugestões da IA</span>
+                                @foreach (var suggestion in _review)
+                                {
+                                    <div class="ai-suggestion">
+                                        <div class="ai-suggestion-head">
+                                            <span class="severity @suggestion.Severity">@SeverityLabel(suggestion.Severity)</span>
+                                            <strong>@suggestion.Title</strong>
+                                            <span class="badge badge-outline">@suggestion.Section</span>
+                                        </div>
+                                        <p>@suggestion.Detail</p>
+                                        @if (!string.IsNullOrWhiteSpace(suggestion.Example))
+                                        {
+                                            <div class="issue-fix"><strong>Exemplo:</strong> @suggestion.Example</div>
+                                        }
+                                    </div>
+                                }
+                            </div>
+                            <hr class="divider" style="margin:14px 0" />
+                        }
+
+                        @if (_currentScore.Issues.Count == 0)
+                        {
+                            <div class="alert alert-info"><Icon Name="check" Size="16" /><span>Nenhum ponto crítico encontrado. Continue adaptando as palavras-chave para cada vaga.</span></div>
+                        }
+                        else
+                        {
+                            <div class="issue-list">
+                                @foreach (var issue in _currentScore.Issues)
+                                {
+                                    <div class="issue @issue.Severity">
+                                        <div class="issue-icon">
+                                            <Icon Name="@(issue.Severity == "critical" ? "alert" : issue.Severity == "warning" ? "info" : "wand")" Size="15" />
+                                        </div>
+                                        <div class="issue-main">
+                                            <strong>@issue.Title <span class="severity @issue.Severity">@SeverityLabel(issue.Severity)</span></strong>
+                                            <p>@issue.Detail</p>
+                                            <div class="issue-fix">@issue.Fix</div>
+                                        </div>
+                                    </div>
+                                }
+                            </div>
+                        }
+                    </section>
+
+                    @if (_mode == "resume" && _resumeId is not null)
+                    {
+                        <section class="card card-pad" style="background:linear-gradient(150deg,#fff,#FBF7EE)">
+                            <div class="row" style="gap:14px;align-items:flex-start">
+                                <span class="issue-icon tip" style="width:38px;height:38px"><Icon Name="sparkles" Size="18" /></span>
+                                <div style="flex:1;min-width:0">
+                                    <strong style="font-family:var(--serif);font-size:19px;font-weight:500">Quer aplicar as correções?</strong>
+                                    <p class="small muted" style="margin-top:3px">Abra o editor e use o assistente ou a adaptação à vaga. Você vê a prévia antes de salvar.</p>
+                                </div>
+                                <a class="btn btn-primary btn-sm" href="@($"/resumes/{_resumeId}/edit")">Abrir editor <Icon Name="arrow-right" Size="14" /></a>
+                            </div>
+                        </section>
+                    }
+                </div>
+            </div>
+        }
+        else
+        {
+            <div class="empty-state">
+                <div class="orb"><Icon Name="target" Size="22" /></div>
+                <h3>Pronto para a análise.</h3>
+                <p>Cole a descrição de uma vaga e clique em Analisar, ou calcule a nota geral do seu currículo.</p>
+                <button class="btn btn-primary" @onclick="Analyze"><Icon Name="search" Size="16" /> Analisar agora</button>
+            </div>
+        }
+    }
+}
+
+@code {
+    private List<ResumeEntity> _resumes = new();
+    private Guid? _resumeId;
+    private ResumeDocument? _document;
+    private string _mode = "resume";
+    private string _job = string.Empty;
+    private string _text = string.Empty;
+    private ResumeScore? _score;
+    private ResumeScore? _textScore;
+    private List<AiSuggestion> _review = new();
+    private string? _aiError;
+    private bool _loading = true;
+    private bool _analyzing;
+    private bool _aiBusy;
+    private bool _createBusy;
+    private AppUser? _user;
+
+    [SupplyParameterFromQuery(Name = "resume")]
+    public Guid? ResumeQuery { get; set; }
+
+    [SupplyParameterFromQuery(Name = "job")]
+    public string? JobQuery { get; set; }
+
+    private ResumeScore? _currentScore => _mode == "resume" ? _score : _textScore;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _user = await Session.GetUserAsync();
+        if (_user is null) return;
+        _resumes = await ResumeStore.ListAsync(_user.Id);
+        var selected = ResumeQuery is { } id && _resumes.Any(r => r.Id == id)
+            ? id
+            : (_resumes.FirstOrDefault(r => r.IsDefault) ?? _resumes.FirstOrDefault())?.Id;
+        _resumeId = selected;
+        if (selected is { } resumeId)
+        {
+            var entity = _resumes.First(r => r.Id == resumeId);
+            _document = Json.Deserialize<ResumeDocument>(entity.DataJson);
+            _score = ResumeScorer.Analyze(_document ?? new ResumeDocument());
+        }
+        if (!string.IsNullOrWhiteSpace(JobQuery)) _job = JobQuery;
+        _loading = false;
+        if (_document is not null) Analyze();
+    }
+
+    private void SetMode(string mode)
+    {
+        _mode = mode;
+        _aiError = null;
+        _review.Clear();
+        if (mode == "text" && _textScore is null && _text.Length > 40) _textScore = ResumeScorer.AnalyzePlainText(_text, _job);
+    }
+
+    private void SelectResume()
+    {
+        var entity = _resumes.FirstOrDefault(r => r.Id == _resumeId);
+        if (entity is null) return;
+        _document = Json.Deserialize<ResumeDocument>(entity.DataJson);
+        Analyze();
+    }
+
+    private void Analyze()
+    {
+        _analyzing = true;
+        _aiError = null;
+        if (_mode == "resume")
+        {
+            if (_document is not null)
+                _score = ResumeScorer.Analyze(_document, _job);
+        }
+        else
+        {
+            _textScore = string.IsNullOrWhiteSpace(_text)
+                ? null
+                : ResumeScorer.AnalyzePlainText(_text, _job);
+        }
+        _review.Clear();
+        _analyzing = false;
+    }
+
+    private void ClearJob()
+    {
+        _job = string.Empty;
+        Analyze();
+    }
+
+    private async Task RunAiReview()
+    {
+        if (_user is null) return;
+        var document = _mode == "resume"
+            ? _document
+            : (string.IsNullOrWhiteSpace(_text) ? null : Importer.ParseHeuristic(_text));
+        if (document is null) return;
+
+        _aiBusy = true;
+        _aiError = null;
+        try
+        {
+            _review = await Ai.ReviewAsync(_user.Id, document, _job);
+            if (_review.Count == 0) _aiError = "A IA não encontrou pontos adicionais. Use os itens locais abaixo.";
+        }
+        catch (AiException ex)
+        {
+            _aiError = ex.Message;
+        }
+        finally
+        {
+            _aiBusy = false;
+        }
+    }
+
+    private async Task CreateFromText()
+    {
+        if (_user is null || string.IsNullOrWhiteSpace(_text)) return;
+        _createBusy = true;
+        try
+        {
+            var document = Importer.ParseHeuristic(_text);
+            var title = TextAnalysis.FirstNonEmpty(document.Contact.Headline, document.Contact.FullName, "Currículo importado");
+            if (title.Length > 60) title = title[..60];
+            var entity = await ResumeStore.CreateAsync(_user.Id, document, title);
+            Toasts.Success("Currículo criado. Revise os dados extraídos.");
+            Nav.NavigateTo($"/resumes/{entity.Id}/edit");
+        }
+        finally
+        {
+            _createBusy = false;
+        }
+    }
+
+    private static int Percent(ScoreCategory category) =>
+        category.Max == 0 ? 0 : (int)Math.Round(100.0 * category.Score / category.Max);
+
+    private static string CatTone(ScoreCategory category)
+    {
+        var pct = Percent(category);
+        return pct >= 75 ? "" : pct >= 50 ? "warn" : "bad";
+    }
+
+    private static string SeverityLabel(string severity) => severity switch
+    {
+        "critical" => "Crítico",
+        "warning" => "Atenção",
+        _ => "Dica"
+    };
+}

@@ -1,0 +1,124 @@
+@inherits LayoutComponentBase
+@inject UserSession Session
+
+<div class="app-shell">
+    <aside class="sidebar @(_menuOpen ? "is-open" : "")">
+        <div class="sidebar-brand">
+            <a href="/" class="brand">
+                <span class="brand-mark">vita<span class="brand-dot">.</span></span>
+                <span class="brand-tag">currículo &amp; carreira</span>
+            </a>
+            <button class="icon-btn sidebar-close" @onclick="ToggleMenu" aria-label="Fechar menu">
+                <Icon Name="x" Size="18" />
+            </button>
+        </div>
+
+        <nav class="sidebar-nav">
+            @foreach (var item in NavItems)
+            {
+                <NavLink class="nav-item" href="@item.Href" Match="@(item.Exact ? NavLinkMatch.All : NavLinkMatch.Prefix)" @onclick="CloseMenu">
+                    <Icon Name="@item.Icon" Size="19" />
+                    <span>@item.Label</span>
+                    @if (item.Badge is not null)
+                    {
+                        <span class="nav-badge">@item.Badge</span>
+                    }
+                </NavLink>
+            }
+        </nav>
+
+        <div class="sidebar-spacer"></div>
+
+        <div class="ai-card">
+            <div class="ai-card-top">
+                <span class="ai-orb"><Icon Name="sparkles" Size="15" /></span>
+                <span class="ai-status-dot"></span>
+            </div>
+            <strong>Assistente Vita</strong>
+            <p>Peça ajustes no currículo em linguagem natural.</p>
+            <a href="/assistant" class="ai-card-link">Abrir assistente <Icon Name="arrow-right" Size="14" /></a>
+        </div>
+
+        @if (_user is not null)
+        {
+            <div class="user-card">
+                <div class="avatar">@Initials(_user.FullName)</div>
+                <div class="user-meta">
+                    <strong>@_user.FullName</strong>
+                    <span>Perfil local</span>
+                </div>
+                <button class="icon-btn" title="Sair" @onclick="Logout" aria-label="Sair">
+                    <Icon Name="logout" Size="18" />
+                </button>
+            </div>
+        }
+    </aside>
+
+    @if (_menuOpen)
+    {
+        <div class="sidebar-scrim" @onclick="ToggleMenu"></div>
+    }
+
+    <div class="main-wrap">
+        <header class="mobile-bar">
+            <button class="icon-btn" @onclick="ToggleMenu" aria-label="Abrir menu">
+                <Icon Name="menu" Size="22" />
+            </button>
+            <a href="/" class="brand brand-mobile"><span class="brand-mark">vita<span class="brand-dot">.</span></span></a>
+            @if (_user is not null)
+            {
+                <div class="avatar avatar-sm">@Initials(_user.FullName)</div>
+            }
+        </header>
+
+        <main class="page">
+            @Body
+        </main>
+    </div>
+</div>
+
+<ToastHost />
+
+@code {
+    private AppUser? _user;
+    private bool _menuOpen;
+
+    private sealed record NavItem(string Href, string Icon, string Label, bool Exact = false, string? Badge = null);
+
+    private static readonly NavItem[] NavItems =
+    {
+        new("/", "home", "Painel", Exact: true),
+        new("/resumes", "file", "Currículos"),
+        new("/ats", "target", "Análise ATS"),
+        new("/jobs", "briefcase", "Vagas"),
+        new("/applications", "columns", "Candidaturas"),
+        new("/cover-letters", "mail", "Cartas"),
+        new("/assistant", "sparkles", "Assistente IA"),
+        new("/templates", "layers", "Modelos"),
+        new("/settings", "settings", "Configurações")
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        _user = await Session.GetUserAsync();
+    }
+
+    private static string Initials(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return "V";
+        var parts = name.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        return parts.Length == 1
+            ? parts[0][..1].ToUpperInvariant()
+            : (parts[0][..1] + parts[^1][..1]).ToUpperInvariant();
+    }
+
+    private void ToggleMenu() => _menuOpen = !_menuOpen;
+    private void CloseMenu() => _menuOpen = false;
+
+    [Inject] private IJSRuntime JS { get; set; } = default!;
+
+    private async Task Logout()
+    {
+        await JS.InvokeVoidAsync("vita.logout");
+    }
+}

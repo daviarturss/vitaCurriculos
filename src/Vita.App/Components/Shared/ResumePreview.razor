@@ -1,0 +1,507 @@
+@if (Document is not null)
+{
+    @if (TemplateId == "classico")
+    {
+        <div class="rp rp-classico" style="--accent:@Accent">
+            <header class="rp-classic-head">
+                <div class="rp-name">@Name</div>
+                @if (!string.IsNullOrWhiteSpace(Document.Contact.Headline))
+                {
+                    <div class="rp-headline">@Document.Contact.Headline</div>
+                }
+                @if (ContactParts().Count > 0)
+                {
+                    <div class="rp-contact">@string.Join("  |  ", ContactParts())</div>
+                }
+                <div class="rp-rule"></div>
+            </header>
+
+            @if (!string.IsNullOrWhiteSpace(Document.Summary))
+            {
+                <section class="rp-section"><h3>@T("summary")</h3><p class="rp-text">@Document.Summary</p></section>
+            }
+
+            @if (Document.Experience.Count > 0)
+            {
+                <section class="rp-section">
+                    <h3>@T("experience")</h3>
+                    @foreach (var exp in Document.Experience)
+                    {
+                        <div class="rp-exp">
+                            <div class="rp-exp-top">
+                                <strong>@exp.Role</strong>
+                                <span class="rp-date">@Period(exp.PeriodLabel)</span>
+                            </div>
+                            <div class="rp-exp-sub">@exp.Company@(string.IsNullOrWhiteSpace(exp.Location) ? "" : " — " + exp.Location)</div>
+                            <ul class="rp-list">@foreach (var b in exp.Bullets) { <li>@b</li> }</ul>
+                        </div>
+                    }
+                </section>
+            }
+
+            @if (Document.Education.Count > 0)
+            {
+                <section class="rp-section">
+                    <h3>@T("education")</h3>
+                    @foreach (var edu in Document.Education)
+                    {
+                        <div class="rp-exp">
+                            <div class="rp-exp-top">
+                                <strong>@($"{edu.Degree} {edu.Field}".Trim())</strong>
+                                <span class="rp-date">@Period(edu.PeriodLabel)</span>
+                            </div>
+                            <div class="rp-exp-sub">@edu.Institution</div>
+                        </div>
+                    }
+                </section>
+            }
+
+            @if (Document.SkillGroups.Count > 0)
+            {
+                <section class="rp-section">
+                    <h3>@T("skills")</h3>
+                    @foreach (var group in Document.SkillGroups)
+                    {
+                        <p class="rp-skill-line"><strong>@group.Name:</strong> @string.Join(", ", group.Items)</p>
+                    }
+                </section>
+            }
+
+            @if (Document.Projects.Count > 0)
+            {
+                <section class="rp-section">
+                    <h3>@T("projects")</h3>
+                    @foreach (var project in Document.Projects)
+                    {
+                        <div class="rp-exp">
+                            <div class="rp-exp-top"><strong>@project.Name</strong>@if (!string.IsNullOrWhiteSpace(project.Link)) { <span class="rp-date">@project.Link</span> }</div>
+                            @if (!string.IsNullOrWhiteSpace(project.Description)) { <p class="rp-text">@project.Description</p> }
+                            <ul class="rp-list">@foreach (var b in project.Bullets) { <li>@b</li> }</ul>
+                        </div>
+                    }
+                </section>
+            }
+
+            @if (Document.Certifications.Count > 0)
+            {
+                <section class="rp-section">
+                    <h3>@T("certifications")</h3>
+                    @foreach (var cert in Document.Certifications)
+                    {
+                        <p class="rp-skill-line">@cert.Name — @cert.Issuer @cert.Year</p>
+                    }
+                </section>
+            }
+
+            @if (Document.Languages.Count > 0)
+            {
+                <section class="rp-section">
+                    <h3>@T("languages")</h3>
+                    <p class="rp-skill-line">@string.Join("   ·   ", Document.Languages.Select(l => $"{l.Name} ({l.Level})"))</p>
+                </section>
+            }
+        </div>
+    }
+    else if (TemplateId == "minimal")
+    {
+        <div class="rp rp-minimal" style="--accent:@Accent">
+            <header class="rp-minimal-head">
+                <div class="rp-name">@Name</div>
+                @if (!string.IsNullOrWhiteSpace(Document.Contact.Headline))
+                {
+                    <div class="rp-headline">@Document.Contact.Headline</div>
+                }
+                @if (ContactParts().Count > 0)
+                {
+                    <div class="rp-contact">@string.Join("   /   ", ContactParts())</div>
+                }
+                <div class="rp-rule"></div>
+            </header>
+
+            @if (!string.IsNullOrWhiteSpace(Document.Summary))
+            {
+                <section class="rp-section"><h3>@T("summary")</h3><p class="rp-text">@Document.Summary</p></section>
+            }
+
+            @if (Document.Experience.Count > 0)
+            {
+                <section class="rp-section">
+                    <h3>@T("experience")</h3>
+                    @foreach (var exp in Document.Experience)
+                    {
+                        <div class="rp-exp">
+                            <div class="rp-exp-top"><strong>@exp.Role</strong><span class="rp-date">@Period(exp.PeriodLabel)</span></div>
+                            <div class="rp-exp-sub">@exp.Company@(string.IsNullOrWhiteSpace(exp.Location) ? "" : " · " + exp.Location)</div>
+                            <ul class="rp-list">@foreach (var b in exp.Bullets) { <li>@b</li> }</ul>
+                        </div>
+                    }
+                </section>
+            }
+
+            @if (Document.SkillGroups.Count > 0)
+            {
+                <section class="rp-section">
+                    <h3>@T("skills")</h3>
+                    @foreach (var group in Document.SkillGroups)
+                    {
+                        <p class="rp-skill-line"><strong>@group.Name.ToUpperInvariant()</strong> &nbsp; @string.Join("  ·  ", group.Items)</p>
+                    }
+                </section>
+            }
+
+            @if (Document.Education.Count > 0)
+            {
+                <section class="rp-section">
+                    <h3>@T("education")</h3>
+                    @foreach (var edu in Document.Education)
+                    {
+                        <div class="rp-exp">
+                            <div class="rp-exp-top"><span>@($"{edu.Degree} {edu.Field} — {edu.Institution}".Trim(' ', '—', ' '))</span><span class="rp-date">@Period(edu.PeriodLabel)</span></div>
+                        </div>
+                    }
+                </section>
+            }
+
+            @if (Document.Projects.Count > 0)
+            {
+                <section class="rp-section">
+                    <h3>@T("projects")</h3>
+                    @foreach (var project in Document.Projects)
+                    {
+                        <div class="rp-exp">
+                            <div class="rp-exp-top"><strong>@project.Name</strong>@if (!string.IsNullOrWhiteSpace(project.Link)) { <span class="rp-date">@project.Link</span> }</div>
+                            @if (!string.IsNullOrWhiteSpace(project.Description)) { <p class="rp-text">@project.Description</p> }
+                            <ul class="rp-list">@foreach (var b in project.Bullets) { <li>@b</li> }</ul>
+                        </div>
+                    }
+                </section>
+            }
+
+            @if (Document.Certifications.Count > 0 || Document.Languages.Count > 0)
+            {
+                <section class="rp-section">
+                    <h3>@T("languages") &amp; @T("certifications")</h3>
+                    @if (Document.Languages.Count > 0)
+                    {
+                        <p class="rp-skill-line">@string.Join("   ·   ", Document.Languages.Select(l => $"{l.Name} — {l.Level}"))</p>
+                    }
+                    @if (Document.Certifications.Count > 0)
+                    {
+                        <p class="rp-skill-line">@string.Join("   ·   ", Document.Certifications.Select(c => $"{c.Name} ({c.Issuer}, {c.Year})"))</p>
+                    }
+                </section>
+            }
+        </div>
+    }
+    else if (TemplateId == "compacto")
+    {
+        <div class="rp rp-compacto" style="--accent:@Accent">
+            <header class="rp-compact-head">
+                <div class="rp-name">@Name</div>
+                @if (!string.IsNullOrWhiteSpace(Document.Contact.Headline))
+                {
+                    <div class="rp-headline">@Document.Contact.Headline</div>
+                }
+                @if (ContactParts().Count > 0)
+                {
+                    <div class="rp-contact">@string.Join(" | ", ContactParts())</div>
+                }
+            </header>
+
+            @if (!string.IsNullOrWhiteSpace(Document.Summary))
+            {
+                <section class="rp-section"><h3>@T("summary")</h3><p class="rp-text">@Document.Summary</p></section>
+            }
+
+            @if (Document.Experience.Count > 0)
+            {
+                <section class="rp-section">
+                    <h3>@T("experience")</h3>
+                    @foreach (var exp in Document.Experience)
+                    {
+                        <div class="rp-exp">
+                            <div class="rp-exp-top"><strong>@exp.Role</strong><span class="rp-date">@Period(exp.PeriodLabel)</span></div>
+                            <div class="rp-exp-sub">@exp.Company@(string.IsNullOrWhiteSpace(exp.Location) ? "" : " | " + exp.Location)</div>
+                            <ul class="rp-list">@foreach (var b in exp.Bullets) { <li>@b</li> }</ul>
+                        </div>
+                    }
+                </section>
+            }
+
+            @if (Document.SkillGroups.Count > 0)
+            {
+                <section class="rp-section">
+                    <h3>@T("skills")</h3>
+                    @foreach (var group in Document.SkillGroups)
+                    {
+                        <p class="rp-skill-line">@group.Name: @string.Join(", ", group.Items)</p>
+                    }
+                </section>
+            }
+
+            @if (Document.Education.Count > 0)
+            {
+                <section class="rp-section">
+                    <h3>@T("education")</h3>
+                    @foreach (var edu in Document.Education)
+                    {
+                        <p class="rp-skill-line">@($"{edu.Degree} {edu.Field} | {edu.Institution} | {Period(edu.PeriodLabel)}".Trim(' ', '|'))</p>
+                    }
+                </section>
+            }
+
+            @if (Document.Projects.Count > 0)
+            {
+                <section class="rp-section">
+                    <h3>@T("projects")</h3>
+                    @foreach (var project in Document.Projects)
+                    {
+                        <p class="rp-skill-line"><strong>@project.Name</strong> @project.Link</p>
+                        @if (!string.IsNullOrWhiteSpace(project.Description)) { <p class="rp-text">@project.Description</p> }
+                        <ul class="rp-list">@foreach (var b in project.Bullets) { <li>@b</li> }</ul>
+                    }
+                </section>
+            }
+
+            @if (Document.Certifications.Count > 0)
+            {
+                <section class="rp-section">
+                    <h3>@T("certifications")</h3>
+                    @foreach (var cert in Document.Certifications)
+                    {
+                        <p class="rp-skill-line">@($"{cert.Name} | {cert.Issuer} | {cert.Year}".Trim(' ', '|'))</p>
+                    }
+                </section>
+            }
+
+            @if (Document.Languages.Count > 0)
+            {
+                <section class="rp-section">
+                    <h3>@T("languages")</h3>
+                    <p class="rp-skill-line">@string.Join(" | ", Document.Languages.Select(l => $"{l.Name}: {l.Level}"))</p>
+                </section>
+            }
+        </div>
+    }
+    else
+    {
+        <div class="rp rp-aurora" style="--accent:@Accent">
+            <header class="rp-aurora-head">
+                <div class="rp-name">@Name</div>
+                @if (!string.IsNullOrWhiteSpace(Document.Contact.Headline))
+                {
+                    <div class="rp-headline">@Document.Contact.Headline</div>
+                }
+                @if (ContactParts().Count > 0)
+                {
+                    <div class="rp-contact">@string.Join("   ·   ", ContactParts())</div>
+                }
+            </header>
+
+            <div class="rp-body">
+                <div class="rp-main">
+                    @if (!string.IsNullOrWhiteSpace(Document.Summary))
+                    {
+                        <section class="rp-section"><h3>@T("summary")</h3><p class="rp-text">@Document.Summary</p></section>
+                    }
+
+                    @if (Document.Experience.Count > 0)
+                    {
+                        <section class="rp-section">
+                            <h3>@T("experience")</h3>
+                            @foreach (var exp in Document.Experience)
+                            {
+                                <div class="rp-exp">
+                                    <div class="rp-exp-top"><strong>@exp.Role</strong><span class="rp-date">@Period(exp.PeriodLabel)</span></div>
+                                    <div class="rp-exp-sub">@exp.Company@(string.IsNullOrWhiteSpace(exp.Location) ? "" : " · " + exp.Location)</div>
+                                    <ul class="rp-list">@foreach (var b in exp.Bullets) { <li>@b</li> }</ul>
+                                </div>
+                            }
+                        </section>
+                    }
+
+                    @if (Document.Projects.Count > 0)
+                    {
+                        <section class="rp-section">
+                            <h3>@T("projects")</h3>
+                            @foreach (var project in Document.Projects)
+                            {
+                                <div class="rp-exp">
+                                    <div class="rp-exp-top"><strong>@project.Name</strong></div>
+                                    @if (!string.IsNullOrWhiteSpace(project.Link)) { <div class="rp-exp-sub">@project.Link</div> }
+                                    @if (!string.IsNullOrWhiteSpace(project.Description)) { <p class="rp-text">@project.Description</p> }
+                                    <ul class="rp-list">@foreach (var b in project.Bullets) { <li>@b</li> }</ul>
+                                </div>
+                            }
+                        </section>
+                    }
+                </div>
+
+                <aside class="rp-side">
+                    @if (ContactDetails().Count > 0)
+                    {
+                        <section class="rp-section">
+                            <h3>@T("contact")</h3>
+                            @foreach (var item in ContactDetails())
+                            {
+                                <div class="rp-contact-item">
+                                    <span class="rp-contact-label">@item.Label</span>
+                                    <span class="rp-contact-value">@item.Value</span>
+                                </div>
+                            }
+                        </section>
+                    }
+
+                    @if (Document.SkillGroups.Count > 0)
+                    {
+                        <section class="rp-section">
+                            <h3>@T("skills")</h3>
+                            @foreach (var group in Document.SkillGroups)
+                            {
+                                <div class="rp-skill-group">
+                                    <span class="rp-skill-name">@group.Name</span>
+                                    <span>@string.Join(" · ", group.Items)</span>
+                                </div>
+                            }
+                        </section>
+                    }
+
+                    @if (Document.Education.Count > 0)
+                    {
+                        <section class="rp-section">
+                            <h3>@T("education")</h3>
+                            @foreach (var edu in Document.Education)
+                            {
+                                <div class="rp-mini-item">
+                                    <strong>@($"{edu.Degree} {edu.Field}".Trim())</strong>
+                                    <span>@edu.Institution</span>
+                                    <em>@Period(edu.PeriodLabel)</em>
+                                </div>
+                            }
+                        </section>
+                    }
+
+                    @if (Document.Certifications.Count > 0)
+                    {
+                        <section class="rp-section">
+                            <h3>@T("certifications")</h3>
+                            @foreach (var cert in Document.Certifications)
+                            {
+                                <div class="rp-mini-item">
+                                    <strong>@cert.Name</strong>
+                                    <em>@($"{cert.Issuer} {cert.Year}".Trim())</em>
+                                </div>
+                            }
+                        </section>
+                    }
+
+                    @if (Document.Languages.Count > 0)
+                    {
+                        <section class="rp-section">
+                            <h3>@T("languages")</h3>
+                            @foreach (var lang in Document.Languages)
+                            {
+                                <div class="rp-lang"><strong>@lang.Name</strong><span>@lang.Level</span></div>
+                            }
+                        </section>
+                    }
+                </aside>
+            </div>
+        </div>
+    }
+}
+
+@code {
+    [Parameter] public ResumeDocument? Document { get; set; }
+    [Parameter] public string TemplateId { get; set; } = "aurora";
+    [Parameter] public string Accent { get; set; } = "#1F6F5C";
+    [Parameter] public string Language { get; set; } = "pt";
+
+    private string Name => string.IsNullOrWhiteSpace(Document?.Contact.FullName) ? "Seu nome" : Document!.Contact.FullName;
+
+    private List<string> ContactParts()
+    {
+        if (Document is null) return new List<string>();
+        var c = Document.Contact;
+        return new[] { c.Email, c.Phone, c.Location, c.LinkedIn, c.Website, c.Github }
+            .Where(v => !string.IsNullOrWhiteSpace(v)).Select(v => v!.Trim()).ToList();
+    }
+
+    private List<(string Label, string Value)> ContactDetails()
+    {
+        if (Document is null) return new List<(string, string)>();
+        var c = Document.Contact;
+        var list = new List<(string, string)>();
+        if (!string.IsNullOrWhiteSpace(c.Email)) list.Add((T("email"), c.Email));
+        if (!string.IsNullOrWhiteSpace(c.Phone)) list.Add((T("phone"), c.Phone));
+        if (!string.IsNullOrWhiteSpace(c.Location)) list.Add((T("location"), c.Location));
+        if (!string.IsNullOrWhiteSpace(c.LinkedIn)) list.Add(("LinkedIn", c.LinkedIn));
+        if (!string.IsNullOrWhiteSpace(c.Website)) list.Add((T("website"), c.Website));
+        if (!string.IsNullOrWhiteSpace(c.Github)) list.Add(("GitHub", c.Github));
+        return list;
+    }
+
+    private string Period(string label)
+    {
+        if (string.IsNullOrWhiteSpace(label)) return "";
+        return Language switch
+        {
+            "en" => label.Replace("Atual", "Present"),
+            "es" => label.Replace("Atual", "Actual"),
+            _ => label
+        };
+    }
+
+    private string T(string key)
+    {
+        var pt = key switch
+        {
+            "summary" => "Perfil",
+            "experience" => "Experiência",
+            "education" => "Formação",
+            "skills" => "Competências",
+            "projects" => "Projetos",
+            "certifications" => "Certificações",
+            "languages" => "Idiomas",
+            "contact" => "Contato",
+            "email" => "E-mail",
+            "phone" => "Telefone",
+            "location" => "Local",
+            "website" => "Site",
+            _ => key
+        };
+        var en = key switch
+        {
+            "summary" => "Summary",
+            "experience" => "Experience",
+            "education" => "Education",
+            "skills" => "Skills",
+            "projects" => "Projects",
+            "certifications" => "Certifications",
+            "languages" => "Languages",
+            "contact" => "Contact",
+            "email" => "Email",
+            "phone" => "Phone",
+            "location" => "Location",
+            "website" => "Website",
+            _ => key
+        };
+        var es = key switch
+        {
+            "summary" => "Perfil",
+            "experience" => "Experiencia",
+            "education" => "Formación",
+            "skills" => "Competencias",
+            "projects" => "Proyectos",
+            "certifications" => "Certificaciones",
+            "languages" => "Idiomas",
+            "contact" => "Contacto",
+            "email" => "Correo",
+            "phone" => "Teléfono",
+            "location" => "Ubicación",
+            "website" => "Sitio",
+            _ => key
+        };
+        return Language switch { "en" => en, "es" => es, _ => pt };
+    }
+}

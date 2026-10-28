@@ -1,0 +1,341 @@
+@page "/"
+@attribute [Authorize]
+@inject UserSession Session
+@inject ResumeStore Resumes
+@inject ApplicationStore Applications
+@inject JobBoardService Jobs
+@inject NavigationManager Nav
+
+<PageTitle>Painel · Vita</PageTitle>
+
+@if (_loading)
+{
+    <div class="page-loader"><span class="spinner"></span></div>
+}
+else if (_user is not null)
+{
+    <div class="page-head">
+        <div class="page-head-main">
+            <span class="eyebrow"><span class="dot"></span> @DateTime.Now.ToString("dddd, d 'de' MMMM", PtBr)</span>
+            <h1 class="page-title">@Greeting, <em>@FirstName.</em></h1>
+            <p class="page-sub">Aqui está o resumo da sua busca. Um currículo melhor, candidaturas mais organizadas e menos silêncio.</p>
+        </div>
+        <div class="page-actions">
+            <button class="btn btn-ghost" @onclick='() => Nav.NavigateTo("/assistant")'>
+                <Icon Name="sparkles" Size="16" /> Assistente IA
+            </button>
+            <button class="btn btn-primary" @onclick='() => Nav.NavigateTo("/resumes?new=1")'>
+                <Icon Name="plus" Size="16" /> Novo currículo
+            </button>
+        </div>
+    </div>
+
+    @if (_resumes.Count == 0)
+    {
+        <div class="empty-state">
+            <div class="orb"><Icon Name="file" Size="22" /></div>
+            <h3>Vamos começar pelo seu currículo.</h3>
+            <p>Crie do zero em poucos minutos ou importe seu PDF/DOCX. A Vita analisa, aponta o que corrigir e adapta para cada vaga.</p>
+            <div class="row-wrap" style="justify-content:center">
+                <button class="btn btn-primary" @onclick='() => Nav.NavigateTo("/resumes?new=1")'><Icon Name="plus" Size="16" /> Criar currículo</button>
+                <button class="btn btn-ghost" @onclick='() => Nav.NavigateTo("/resumes?import=1")'><Icon Name="upload" Size="16" /> Importar arquivo</button>
+            </div>
+        </div>
+    }
+    else
+    {
+        <div class="dash-grid">
+            <div class="dash-left">
+                <section class="card score-card">
+                    <ScoreRing Value="@_score.Total" Size="128" />
+                    <div class="score-card-main">
+                        <span class="eyebrow">Currículo principal</span>
+                        <h2>@_resumeTitle</h2>
+                        <p>@_score.Verdict</p>
+                        <div class="score-bars">
+                            @foreach (var category in _score.Categories.Where(c => c.Key is "experience" or "skills" or "ats"))
+                            {
+                                <div class="score-bar-row">
+                                    <span>@category.Name</span>
+                                    <div class="score-bar-track">
+                                        <div class="score-bar-fill" style="width:@(Percent(category))%"></div>
+                                    </div>
+                                    <b>@category.Score/@category.Max</b>
+                                </div>
+                            }
+                        </div>
+                        <div class="row-wrap" style="margin-top:15px">
+                            <button class="btn btn-accent btn-sm" @onclick="OpenResume">
+                                <Icon Name="pencil" Size="14" /> Continuar editando
+                            </button>
+                            <button class="btn btn-ghost btn-sm" @onclick='() => Nav.NavigateTo($"/ats?resume={_defaultResume?.Id}")'>
+                                <Icon Name="target" Size="14" /> Ver análise completa
+                            </button>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="card card-pad">
+                    <div class="section-head">
+                        <h2>Seu pipeline</h2>
+                        <a href="/applications">Abrir candidaturas <Icon Name="arrow-right" Size="13" /></a>
+                    </div>
+                    <div class="pipeline">
+                        <div class="pipeline-stage">
+                            <div class="pipeline-count">@_statusCounts.GetValueOrDefault(ApplicationStatuses.Saved)</div>
+                            <div class="pipeline-label"><span class="stage-dot" style="background:#9C978B"></span> Salvos</div>
+                        </div>
+                        <div class="pipeline-stage">
+                            <div class="pipeline-count">@_statusCounts.GetValueOrDefault(ApplicationStatuses.Applied)</div>
+                            <div class="pipeline-label"><span class="stage-dot" style="background:#3C7FA6"></span> Aplicados</div>
+                        </div>
+                        <div class="pipeline-stage">
+                            <div class="pipeline-count">@_statusCounts.GetValueOrDefault(ApplicationStatuses.Interview)</div>
+                            <div class="pipeline-label"><span class="stage-dot" style="background:#D99A34"></span> Entrevistas</div>
+                        </div>
+                        <div class="pipeline-stage">
+                            <div class="pipeline-count">@_statusCounts.GetValueOrDefault(ApplicationStatuses.Offer)</div>
+                            <div class="pipeline-label"><span class="stage-dot" style="background:#1E6B57"></span> Propostas</div>
+                        </div>
+                        <div class="pipeline-stage">
+                            <div class="pipeline-count">@_statusCounts.GetValueOrDefault(ApplicationStatuses.Rejected)</div>
+                            <div class="pipeline-label"><span class="stage-dot" style="background:#BE5430"></span> Arquivados</div>
+                        </div>
+                    </div>
+
+                    @if (_applications.Count > 0)
+                    {
+                        <div class="next-list" style="margin-top:16px">
+                            @foreach (var app in _applications.Where(a => a.Status is ApplicationStatuses.Interview or ApplicationStatuses.Offer or ApplicationStatuses.Saved).Take(3))
+                            {
+                                <div class="next-item">
+                                    <div class="next-date">
+                                        <b>@(app.NextStepAt?.ToString("dd") ?? app.UpdatedAt.ToString("dd"))</b>
+                                        <span>@((app.NextStepAt ?? app.UpdatedAt).ToString("MMM", PtBr))</span>
+                                    </div>
+                                    <div class="next-main">
+                                        <strong>@app.Position</strong>
+                                        <span>@app.Company · @ApplicationStatuses.Label(app.Status)</span>
+                                    </div>
+                                    <span class="badge @StatusBadge(app.Status) badge-dot">@RelativeStep(app)</span>
+                                </div>
+                            }
+                        </div>
+                    }
+                </section>
+
+                <div class="grid grid-2">
+                    <section class="card card-pad">
+                        <div class="section-head">
+                            <h2>Seus currículos</h2>
+                            <a href="/resumes">Ver todos <Icon Name="arrow-right" Size="13" /></a>
+                        </div>
+                        @foreach (var resume in _resumes.Take(3))
+                        {
+                            <a class="recent-resume" href="@($"/resumes/{resume.Id}/edit")">
+                                <div class="resume-thumb" style="border-left:3px solid @resume.AccentColor">
+                                    <i></i><i></i><i style="width:80%"></i><i style="width:60%"></i>
+                                </div>
+                                <div class="next-main">
+                                    <strong>@resume.Title</strong>
+                                    <span>Atualizado @HumanDate(resume.UpdatedAt)</span>
+                                </div>
+                                @if (resume.IsDefault)
+                                {
+                                    <span class="badge badge-soft">Principal</span>
+                                }
+                            </a>
+                        }
+                    </section>
+
+                    <section class="card card-pad">
+                        <div class="section-head">
+                            <h2>Atalhos</h2>
+                        </div>
+                        <div class="stack-sm">
+                            <a class="next-item" href="/ats" style="padding:9px 0">
+                                <span class="issue-icon tip" style="width:32px;height:32px"><Icon Name="target" Size="16" /></span>
+                                <div class="next-main"><strong>Analisar ATS</strong><span>Nota e correções do currículo</span></div>
+                                <Icon Name="chevron-right" Size="15" />
+                            </a>
+                            <a class="next-item" href="/jobs" style="padding:9px 0">
+                                <span class="issue-icon tip" style="width:32px;height:32px"><Icon Name="briefcase" Size="16" /></span>
+                                <div class="next-main"><strong>Buscar vagas</strong><span>Compatíveis com seu perfil</span></div>
+                                <Icon Name="chevron-right" Size="15" />
+                            </a>
+                            <a class="next-item" href="/cover-letters" style="padding:9px 0;border-bottom:0">
+                                <span class="issue-icon tip" style="width:32px;height:32px"><Icon Name="mail" Size="16" /></span>
+                                <div class="next-main"><strong>Cartas de apresentação</strong><span>Gerar e personalizar por vaga</span></div>
+                                <Icon Name="chevron-right" Size="15" />
+                            </a>
+                        </div>
+                    </section>
+                </div>
+            </div>
+
+            <div class="dash-right">
+                <div class="metric-grid">
+                    <div class="metric">
+                        <span class="metric-label">Ativas</span>
+                        <span class="metric-value">@_activeCount</span>
+                        <span class="metric-foot">candidaturas em jogo</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Entrevistas</span>
+                        <span class="metric-value">@_statusCounts.GetValueOrDefault(ApplicationStatuses.Interview)</span>
+                        <span class="metric-foot">em andamento</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Resposta</span>
+                        <span class="metric-value">@_responseRate%</span>
+                        <span class="metric-foot">das aplicações</span>
+                    </div>
+                </div>
+
+                <section class="ai-insight">
+                    <span class="eyebrow"><Icon Name="sparkles" Size="13" /> Próximo ajuste</span>
+                    <h3>@_topIssue?.Title</h3>
+                    <p>@(_topIssue?.Detail ?? "Seu currículo está bem estruturado. Adapte as palavras-chave para cada vaga antes de aplicar.")</p>
+                    @if (_topIssue is not null)
+                    {
+                        <div class="insight-issue">
+                            <span class="dot"></span>
+                            <span>@_topIssue.Fix</span>
+                        </div>
+                    }
+                    <button class="btn btn-accent btn-sm" @onclick="OpenResume">
+                        <Icon Name="wand" Size="14" /> Corrigir com a IA
+                    </button>
+                </section>
+
+                <section class="card card-pad">
+                    <div class="section-head">
+                        <h2>Vagas salvas</h2>
+                        <a href="/jobs">Explorar <Icon Name="arrow-right" Size="13" /></a>
+                    </div>
+                    @if (_savedJobs.Count == 0)
+                    {
+                        <div class="empty-mini">Nenhuma vaga salva ainda. Encontre vagas compatíveis na aba Vagas.</div>
+                    }
+                    else
+                    {
+                        @foreach (var saved in _savedJobs.Take(3))
+                        {
+                            var match = _document is null ? saved.MatchScore : JobMatcher.Score(_document, saved.Title, saved.Description, saved.Location).Score;
+                            <div class="next-item">
+                                <div class="job-logo" style="width:36px;height:36px;border-radius:9px;font-size:14px">@Initial(saved.Company)</div>
+                                <div class="next-main">
+                                    <strong>@saved.Title</strong>
+                                    <span>@saved.Company · @saved.Location</span>
+                                </div>
+                                <span class="score-pill @MatchTone(match)">@match%</span>
+                            </div>
+                        }
+                    }
+                </section>
+
+                <section class="card card-pad" style="background:linear-gradient(150deg,#fff, #FBF7EE)">
+                    <div class="row" style="gap:12px;align-items:flex-start">
+                        <span class="avatar avatar-lg" style="background:var(--ink);color:#F6F2E7"><Icon Name="sparkles" Size="20" /></span>
+                        <div style="min-width:0">
+                            <strong style="font-family:var(--serif);font-size:18px;font-weight:500">Converse com a Vita</strong>
+                            <p class="small muted" style="margin-top:3px;line-height:1.55">"Deixe meu resumo mais direcionado para vagas de produto sênior."</p>
+                        </div>
+                    </div>
+                    <button class="btn btn-ghost btn-block btn-sm" style="margin-top:13px" @onclick='() => Nav.NavigateTo("/assistant")'>
+                        Abrir assistente <Icon Name="arrow-right" Size="14" />
+                    </button>
+                </section>
+            </div>
+        </div>
+    }
+}
+
+@code {
+    private static readonly CultureInfo PtBr = new("pt-BR");
+
+    private AppUser? _user;
+    private ResumeDocument? _document;
+    private ResumeScore _score = new(0, "—", "", Array.Empty<ScoreCategory>(), Array.Empty<ScoreIssue>(), null);
+    private List<ResumeEntity> _resumes = new();
+    private List<ApplicationEntity> _applications = new();
+    private List<SavedJob> _savedJobs = new();
+    private ResumeEntity? _defaultResume;
+    private Dictionary<string, int> _statusCounts = new();
+    private ScoreIssue? _topIssue;
+    private bool _loading = true;
+    private int _activeCount;
+    private int _responseRate;
+
+    private string _resumeTitle => _defaultResume?.Title ?? "Currículo principal";
+    private string FirstName => string.IsNullOrWhiteSpace(_user?.FullName) ? "" : _user!.FullName.Split(' ')[0];
+    private string Greeting => DateTime.Now.Hour switch { < 12 => "Bom dia", < 18 => "Boa tarde", _ => "Boa noite" };
+
+    protected override async Task OnInitializedAsync()
+    {
+        _user = await Session.GetUserAsync();
+        if (_user is null) return;
+
+        _resumes = await Resumes.ListAsync(_user.Id);
+        _applications = await Applications.ListAsync(_user.Id);
+        _savedJobs = await Jobs.ListSavedAsync(_user.Id);
+        _defaultResume = _resumes.FirstOrDefault(r => r.IsDefault) ?? _resumes.FirstOrDefault();
+
+        if (_defaultResume is not null)
+        {
+            _document = Json.Deserialize<ResumeDocument>(_defaultResume.DataJson) ?? new ResumeDocument();
+            _score = ResumeScorer.Analyze(_document);
+            _topIssue = _score.Issues.FirstOrDefault();
+        }
+
+        _statusCounts = ApplicationStatuses.All.ToDictionary(s => s, s => _applications.Count(a => a.Status == s));
+        _activeCount = _applications.Count(a => a.Status is not ApplicationStatuses.Rejected);
+        var applied = _applications.Count(a => a.AppliedAt is not null);
+        var responded = _applications.Count(a => a.Status is ApplicationStatuses.Interview or ApplicationStatuses.Offer);
+        _responseRate = applied == 0 ? 0 : (int)Math.Round(100.0 * responded / applied);
+        _loading = false;
+    }
+
+    private Task OpenResume()
+    {
+        if (_defaultResume is not null)
+            Nav.NavigateTo($"/resumes/{_defaultResume.Id}/edit");
+        return Task.CompletedTask;
+    }
+
+    private static int Percent(ScoreCategory category) =>
+        category.Max == 0 ? 0 : (int)Math.Round(100.0 * category.Score / category.Max);
+
+    private static string StatusBadge(string status) => status switch
+    {
+        ApplicationStatuses.Interview => "badge-sun",
+        ApplicationStatuses.Offer => "badge-soft",
+        ApplicationStatuses.Rejected => "badge-clay",
+        ApplicationStatuses.Applied => "badge-outline",
+        _ => "badge-outline"
+    };
+
+    private static string RelativeStep(ApplicationEntity app)
+    {
+        if (app.NextStepAt is null) return ApplicationStatuses.Label(app.Status);
+        var days = (app.NextStepAt.Value.Date - DateTime.Today).Days;
+        return days switch { < 0 => "atrasado", 0 => "hoje", 1 => "amanhã", _ => $"em {days} dias" };
+    }
+
+    private static string HumanDate(DateTime value)
+    {
+        var days = (DateTime.UtcNow - value).TotalDays;
+        return days switch
+        {
+            < 1 => "hoje",
+            < 2 => "ontem",
+            < 30 => $"há {(int)days} dias",
+            _ => value.ToString("d MMM", PtBr)
+        };
+    }
+
+    private static string Initial(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? "?" : value.Trim()[..1].ToUpperInvariant();
+
+    private static string MatchTone(int score) => score >= 80 ? "" : score >= 60 ? "warn" : "bad";
+}

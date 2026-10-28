@@ -1,0 +1,482 @@
+@page "/resumes"
+@attribute [Authorize]
+@inject UserSession Session
+@inject ResumeStore ResumeStore
+@inject ImportService Importer
+@inject AiAssistantService Ai
+@inject ToastService Toasts
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+
+<PageTitle>Currículos · Vita</PageTitle>
+
+<div class="page-head">
+    <div class="page-head-main">
+        <span class="eyebrow"><span class="dot"></span> Documentos</span>
+        <h1 class="page-title">Seus <em>currículos</em></h1>
+        <p class="page-sub">Uma versão para cada objetivo. Mantenha o principal atualizado e adapte cópias para vagas específicas.</p>
+    </div>
+    <div class="page-actions">
+        <button class="btn btn-ghost" @onclick="OpenImport">
+            <Icon Name="upload" Size="16" /> Importar
+        </button>
+        <button class="btn btn-primary" @onclick="OpenCreate">
+            <Icon Name="plus" Size="16" /> Novo currículo
+        </button>
+    </div>
+</div>
+
+@if (_loading)
+{
+    <div class="page-loader"><span class="spinner"></span></div>
+}
+else
+{
+    <div class="resumes-grid">
+        @foreach (var item in _items)
+        {
+            <article class="card resume-card card-hover">
+                <div class="resume-card-top">
+                    <div class="resume-card-accent" style="--rc-accent:@item.Resume.AccentColor"></div>
+                    <div class="resume-mini" style="--rc-accent:@item.Resume.AccentColor">
+                        <i class="h"></i>
+                        <i style="width:78%"></i>
+                        <i style="width:55%"></i>
+                        <div class="mini-row">
+                            <div class="mini-col">
+                                <i></i><i style="width:90%"></i><i style="width:70%"></i><i style="width:82%"></i><i style="width:60%"></i>
+                            </div>
+                            <div class="mini-col">
+                                <i></i><i style="width:80%"></i><i style="width:65%"></i>
+                            </div>
+                        </div>
+                    </div>
+                    <span class="badge @(item.Resume.IsDefault ? "badge-ink" : "badge-outline")">@(item.Resume.IsDefault ? "Principal" : LanguageLabel(item.Resume.Language))</span>
+                </div>
+                <div class="resume-card-body">
+                    <h3>@item.Resume.Title</h3>
+                    <div class="resume-card-meta">
+                        <Icon Name="clock" Size="12" /> Atualizado @Human(item.Resume.UpdatedAt)
+                        <span>·</span>
+                        <span>@TemplateLabel(item.Resume.TemplateId)</span>
+                    </div>
+                    <div class="resume-card-foot">
+                        <span class="score-pill @ScoreTone(item.Score.Total)"><b>@item.Score.Total</b> / 100</span>
+                        <div class="row" style="gap:2px">
+                            <button class="icon-btn" title="Duplicar" @onclick="() => Duplicate(item.Resume)">
+                                <Icon Name="copy" Size="16" />
+                            </button>
+                            <a class="icon-btn" title="Baixar PDF" href="@($"/api/resumes/{item.Resume.Id}/pdf")">
+                                <Icon Name="download" Size="16" />
+                            </a>
+                            <button class="icon-btn danger" title="Excluir" @onclick="() => AskDelete(item.Resume)">
+                                <Icon Name="trash" Size="16" />
+                            </button>
+                        </div>
+                    </div>
+                    <div class="row" style="gap:6px;margin-top:4px">
+                        <a class="btn btn-soft btn-sm" style="flex:1" href="@($"/resumes/{item.Resume.Id}/edit")">
+                            <Icon Name="pencil" Size="14" /> Editar
+                        </a>
+                        @if (!item.Resume.IsDefault)
+                        {
+                            <button class="btn btn-ghost btn-sm" title="Definir como principal" @onclick="() => MakeDefault(item.Resume)">
+                                <Icon Name="star" Size="14" />
+                            </button>
+                        }
+                    </div>
+                </div>
+            </article>
+        }
+
+        <button class="create-card" @onclick="OpenCreate">
+            <span class="plus-orb"><Icon Name="plus" Size="20" /></span>
+            <strong>Criar novo currículo</strong>
+            <span>Do zero, com modelo e assistente de IA</span>
+        </button>
+
+        <button class="create-card" @onclick="OpenImport">
+            <span class="plus-orb"><Icon Name="upload" Size="20" /></span>
+            <strong>Importar existente</strong>
+            <span>PDF, DOCX ou texto colado</span>
+        </button>
+    </div>
+}
+
+<Modal Open="_createOpen" Title="Novo currículo" Subtitle="Escolha um ponto de partida. Você pode trocar o modelo depois." OnClose="CloseCreate" Size="lg">
+    <ChildContent>
+    <div class="field">
+        <span>Nome do currículo</span>
+        <input @bind="_newTitle" placeholder="Ex.: Product Designer · Sênior" />
+    </div>
+
+    <div class="field">
+        <span>Modelo</span>
+        <div class="template-options">
+            @foreach (var template in Templates)
+            {
+                <button class="template-option @(_newTemplate == template.Id ? "active" : "")" @onclick="() => _newTemplate = template.Id" type="button">
+                    <span class="tp-mini tp-@template.Id" style="--tp-accent:@_newAccent">
+                        <i></i><i></i><i></i>
+                    </span>
+                    <span class="tp-label">
+                        <strong>@template.Name</strong>
+                        <em>@template.Description</em>
+                    </span>
+                    @if (_newTemplate == template.Id)
+                    {
+                        <span class="tp-check"><Icon Name="check" Size="12" /></span>
+                    }
+                </button>
+            }
+        </div>
+    </div>
+
+    <div class="form-grid">
+        <div class="field">
+            <span>Idioma do documento</span>
+            <select class="select" @bind="_newLanguage">
+                <option value="pt">Português</option>
+                <option value="en">English</option>
+                <option value="es">Español</option>
+            </select>
+        </div>
+        <div class="field">
+            <span>Cor de destaque</span>
+            <div class="color-row" style="height:40px">
+                @foreach (var color in Palette)
+                {
+                    <button type="button" class="color-dot @(_newAccent == color ? "active" : "")" style="background:@color" @onclick="() => _newAccent = color"></button>
+                }
+            </div>
+        </div>
+    </div>
+
+    </ChildContent>
+
+    <Footer>
+        <button class="btn btn-ghost" @onclick="CloseCreate">Cancelar</button>
+        <button class="btn btn-primary" @onclick="CreateResume" disabled="@_busy">
+            @if (_busy) { <span class="spinner spinner-sm"></span> }
+            Criar e editar
+        </button>
+    </Footer>
+</Modal>
+
+<Modal Open="_deleteOpen" Title="Excluir currículo?" Subtitle="Esta ação não pode ser desfeita. As candidaturas ligadas a ele continuam salvas." OnClose="() => _deleteOpen = false">
+    <ChildContent>
+    @if (_deleteTarget is not null)
+    {
+        <div class="alert alert-warn">
+            <Icon Name="alert" Size="17" />
+            <span>O currículo <strong>@_deleteTarget.Title</strong> será removido deste computador.</span>
+        </div>
+    }
+    </ChildContent>
+    <Footer>
+        <button class="btn btn-ghost" @onclick="() => _deleteOpen = false">Cancelar</button>
+        <button class="btn btn-danger" @onclick="DeleteResume">Excluir definitivamente</button>
+    </Footer>
+</Modal>
+
+<Modal Open="_importOpen" Title="Importar currículo" Subtitle="Envie um PDF ou DOCX, ou cole o texto. A Vita tenta extrair contato, experiências, formação e competências." OnClose="CloseImport" Size="lg">
+    <ChildContent>
+    @if (!string.IsNullOrWhiteSpace(_importError))
+    {
+        <div class="alert alert-error"><Icon Name="alert" Size="16" /><span>@_importError</span></div>
+    }
+
+    @if (_parsed is null)
+    {
+        <label class="import-drop">
+            <InputFile OnChange="HandleFile" accept=".pdf,.docx,.txt,.md" />
+            <span class="import-orb">
+                @if (_importBusy) { <span class="spinner"></span> } else { <Icon Name="upload" Size="22" /> }
+            </span>
+            <strong>@(_importBusy ? "Lendo seu arquivo…" : "Arraste seu arquivo ou clique para escolher")</strong>
+            <span>PDF (com texto), DOCX ou TXT · até 10 MB</span>
+        </label>
+
+        <div class="or-line"><span>ou cole o texto</span></div>
+        <textarea class="textarea" rows="6" @bind="_importText" placeholder="Cole aqui o conteúdo do seu currículo…"></textarea>
+        <button class="btn btn-ghost btn-sm" @onclick="ParsePasted" disabled="@string.IsNullOrWhiteSpace(_importText)">
+            <Icon Name="wand" Size="14" /> Extrair dados do texto
+        </button>
+    }
+    else
+    {
+        <div class="alert alert-info">
+            <Icon Name="check" Size="17" />
+            <span>@_importSummary</span>
+        </div>
+
+        <div class="import-preview">
+            <div>
+                <span class="muted-label">Nome</span>
+                <strong>@(_parsed.Contact.FullName is { Length: > 0 } n ? n : "Não identificado")</strong>
+            </div>
+            <div>
+                <span class="muted-label">Título</span>
+                <strong>@(_parsed.Contact.Headline is { Length: > 0 } h ? h : "—")</strong>
+            </div>
+            <div>
+                <span class="muted-label">Experiências</span>
+                <strong>@_parsed.Experience.Count</strong>
+            </div>
+            <div>
+                <span class="muted-label">Competências</span>
+                <strong>@_parsed.AllSkills.Count()</strong>
+            </div>
+        </div>
+
+        @if (_parsed.Experience.Count > 0)
+        {
+            <div class="stack-sm">
+                @foreach (var exp in _parsed.Experience.Take(3))
+                {
+                    <div class="diff-item">
+                        <div class="diff-head"><span>@exp.PeriodLabel</span></div>
+                        <strong style="font-size:12.5px">@exp.Role</strong>
+                        <div class="small muted">@exp.Company</div>
+                    </div>
+                }
+            </div>
+        }
+
+        <label class="checkbox-row">
+            <input type="checkbox" @bind="_refineWithAi" />
+            <span>Refinar a extração com IA (mais preciso, precisa do provedor configurado)</span>
+        </label>
+
+        <button class="add-row-btn" @onclick="ResetImport"><Icon Name="refresh" Size="14" /> Escolher outro arquivo</button>
+    }
+    </ChildContent>
+
+    <Footer>
+        <button class="btn btn-ghost" @onclick="CloseImport">Cancelar</button>
+        @if (_parsed is not null)
+        {
+            <button class="btn btn-primary" @onclick="CreateFromImport" disabled="@_busy">
+                @if (_busy) { <span class="spinner spinner-sm"></span> }
+                Criar currículo importado
+            </button>
+        }
+    </Footer>
+</Modal>
+
+@code {
+    private sealed record ResumeItem(ResumeEntity Resume, ResumeScore Score);
+    private sealed record TemplateInfo(string Id, string Name, string Description);
+
+    private static readonly TemplateInfo[] Templates =
+    {
+        new("aurora", "Aurora", "Duas colunas, cabeçalho colorido"),
+        new("classico", "Clássico", "Editorial, centrado e sério"),
+        new("minimal", "Minimal", "Muito espaço em branco"),
+        new("compacto", "Compacto", "Máxima legibilidade ATS")
+    };
+
+    private static readonly string[] Palette = { "#1F6F5C", "#2F5D8A", "#B5502F", "#7A4B7E", "#3A3A33", "#A8762A" };
+
+    private List<ResumeItem> _items = new();
+    private bool _loading = true;
+    private bool _busy;
+    private AppUser? _user;
+
+    private bool _createOpen, _deleteOpen, _importOpen;
+    private string _newTitle = "";
+    private string _newTemplate = "aurora";
+    private string _newLanguage = "pt";
+    private string _newAccent = "#1F6F5C";
+    private ResumeEntity? _deleteTarget;
+
+    private string _importText = "";
+    private ResumeDocument? _parsed;
+    private string _importSummary = "";
+    private string? _importError;
+    private bool _importBusy;
+    private bool _refineWithAi = true;
+
+    [SupplyParameterFromQuery(Name = "new")] public string? NewQuery { get; set; }
+    [SupplyParameterFromQuery(Name = "import")] public string? ImportQuery { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        _user = await Session.GetUserAsync();
+        if (_user is null) return;
+        await LoadAsync();
+        if (NewQuery == "1") OpenCreate();
+        if (ImportQuery == "1") OpenImport();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _items = (await ResumeStore.ListAsync(_user!.Id))
+            .Select(r => new ResumeItem(r, ResumeScorer.Analyze(Json.Deserialize<ResumeDocument>(r.DataJson) ?? new ResumeDocument())))
+            .ToList();
+        _loading = false;
+    }
+
+    private void OpenCreate()
+    {
+        _newTitle = "";
+        _newTemplate = "aurora";
+        _newAccent = "#1F6F5C";
+        _newLanguage = "pt";
+        _createOpen = true;
+    }
+
+    private void CloseCreate() => _createOpen = false;
+
+    private async Task CreateResume()
+    {
+        if (_user is null) return;
+        _busy = true;
+        try
+        {
+            var document = new ResumeDocument();
+            document.Contact.FullName = _user.FullName;
+            var title = string.IsNullOrWhiteSpace(_newTitle)
+                ? (string.IsNullOrWhiteSpace(document.Contact.Headline) ? "Meu currículo" : document.Contact.Headline)
+                : _newTitle.Trim();
+            var entity = await ResumeStore.CreateAsync(_user.Id, document, title, _newTemplate, _newAccent, _newLanguage);
+            _createOpen = false;
+            Toasts.Success("Currículo criado. Agora é só preencher.");
+            Nav.NavigateTo($"/resumes/{entity.Id}/edit");
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task Duplicate(ResumeEntity resume)
+    {
+        if (_user is null) return;
+        var copy = await ResumeStore.DuplicateAsync(resume.Id, _user.Id);
+        await LoadAsync();
+        if (copy is not null) Toasts.Success("Cópia criada.");
+    }
+
+    private async Task MakeDefault(ResumeEntity resume)
+    {
+        if (_user is null) return;
+        await ResumeStore.SetDefaultAsync(resume.Id, _user.Id);
+        await LoadAsync();
+        Toasts.Success("Currículo principal atualizado.");
+    }
+
+    private void AskDelete(ResumeEntity resume)
+    {
+        _deleteTarget = resume;
+        _deleteOpen = true;
+    }
+
+    private async Task DeleteResume()
+    {
+        if (_user is null || _deleteTarget is null) return;
+        await ResumeStore.DeleteAsync(_deleteTarget.Id, _user.Id);
+        _deleteOpen = false;
+        _deleteTarget = null;
+        await LoadAsync();
+        Toasts.Success("Currículo excluído.");
+    }
+
+    private void OpenImport()
+    {
+        ResetImport();
+        _importOpen = true;
+    }
+
+    private void CloseImport()
+    {
+        _importOpen = false;
+        ResetImport();
+    }
+
+    private void ResetImport()
+    {
+        _importText = "";
+        _parsed = null;
+        _importError = null;
+        _importSummary = "";
+        _importBusy = false;
+    }
+
+    private async Task HandleFile(InputFileChangeEventArgs args)
+    {
+        ResetImport();
+        var file = args.File;
+        if (file.Size > 10 * 1024 * 1024)
+        {
+            _importError = "O arquivo passa de 10 MB. Envie um arquivo menor.";
+            return;
+        }
+        try
+        {
+            _importBusy = true;
+            await using var stream = file.OpenReadStream(10 * 1024 * 1024);
+            var extracted = await Importer.ExtractAsync(stream, file.Name);
+            if (string.IsNullOrWhiteSpace(extracted.Text))
+                throw new InvalidOperationException("Não consegui ler texto neste arquivo. Se for um PDF escaneado, envie a versão em DOCX ou TXT.");
+            _importText = extracted.Text;
+            _parsed = Importer.ParseHeuristic(extracted.Text);
+            _importSummary = $"{file.Name} · {extracted.Kind} · {extracted.Pages} página(s) · {TextAnalysis.WordCount(extracted.Text)} palavras";
+        }
+        catch (Exception ex)
+        {
+            _importError = ex.Message;
+        }
+        finally
+        {
+            _importBusy = false;
+        }
+    }
+
+    private void ParsePasted()
+    {
+        ResetImport();
+        _parsed = Importer.ParseHeuristic(_importText);
+        _importSummary = $"Texto colado · {TextAnalysis.WordCount(_importText)} palavras";
+    }
+
+    private async Task CreateFromImport()
+    {
+        if (_user is null || _parsed is null) return;
+        _busy = true;
+        _importError = null;
+        var document = _parsed;
+
+        if (_refineWithAi)
+        {
+            try
+            {
+                var refined = await Ai.ParseResumeAsync(_user.Id, _importText);
+                if (refined is not null) document = refined;
+            }
+            catch (AiException ex)
+            {
+                _importError = "Não foi possível refinar com IA: " + ex.Message + " Usamos a extração local.";
+            }
+        }
+
+        var title = TextAnalysis.FirstNonEmpty(document.Contact.Headline, document.Contact.FullName, "Currículo importado");
+        if (title.Length > 60) title = title[..60];
+        var entity = await ResumeStore.CreateAsync(_user.Id, document, title);
+        _importOpen = false;
+        _busy = false;
+        Toasts.Success("Currículo importado. Revise os dados antes de aplicar.");
+        Nav.NavigateTo($"/resumes/{entity.Id}/edit");
+    }
+
+    private static string Human(DateTime value)
+    {
+        var days = (DateTime.UtcNow - value).TotalDays;
+        return days switch { < 1 => "hoje", < 2 => "ontem", < 30 => $"há {(int)days} dias", _ => value.ToString("d MMM", new CultureInfo("pt-BR")) };
+    }
+
+    private static string ScoreTone(int score) => score >= 80 ? "" : score >= 60 ? "warn" : "bad";
+    private static string TemplateLabel(string id) => Templates.FirstOrDefault(t => t.Id == id)?.Name ?? "Aurora";
+    private static string LanguageLabel(string lang) => lang switch { "en" => "EN", "es" => "ES", _ => "PT" };
+}

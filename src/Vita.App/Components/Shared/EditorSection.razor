@@ -1,0 +1,26 @@
+<div class="section-block @(Open ? "open" : "")">
+    <button type="button" class="section-head-btn" @onclick="() => OnToggle.InvokeAsync()">
+        <span class="section-num">@Number</span>
+        <strong>@Title</strong>
+        @if (!string.IsNullOrWhiteSpace(Badge))
+        {
+            <span class="badge badge-outline">@Badge</span>
+        }
+        <Icon Name="chevron-down" Size="16" Class="chev" />
+    </button>
+    @if (Open)
+    {
+        <div class="section-body">
+            @ChildContent
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public string Number { get; set; } = "01";
+    [Parameter] public string Title { get; set; } = "";
+    [Parameter] public string? Badge { get; set; }
+    [Parameter] public bool Open { get; set; }
+    [Parameter] public EventCallback OnToggle { get; set; }
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+}

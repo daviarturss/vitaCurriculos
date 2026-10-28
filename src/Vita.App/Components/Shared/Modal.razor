@@ -1,0 +1,41 @@
+@if (Open)
+{
+    <div class="modal-backdrop" @onclick="HandleBackdrop" @onclick:preventDefault="true">
+        <div class="modal-card modal-@Size" @onclick:stopPropagation="true" role="dialog" aria-modal="true">
+            <header class="modal-head">
+                <div>
+                    <h2>@Title</h2>
+                    @if (!string.IsNullOrWhiteSpace(Subtitle))
+                    {
+                        <p>@Subtitle</p>
+                    }
+                </div>
+                <button type="button" class="icon-btn" @onclick="() => OnClose.InvokeAsync()" aria-label="Fechar">
+                    <Icon Name="x" Size="18" />
+                </button>
+            </header>
+            <div class="modal-body">
+                @ChildContent
+            </div>
+            @if (Footer is not null)
+            {
+                <footer class="modal-foot">@Footer</footer>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public bool Open { get; set; }
+    [Parameter] public string Title { get; set; } = "";
+    [Parameter] public string? Subtitle { get; set; }
+    [Parameter] public string Size { get; set; } = "md";
+    [Parameter] public EventCallback OnClose { get; set; }
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+    [Parameter] public RenderFragment? Footer { get; set; }
+
+    private async Task HandleBackdrop()
+    {
+        if (OnClose.HasDelegate) await OnClose.InvokeAsync();
+    }
+}

@@ -1,0 +1,26 @@
+@{
+    var radius = 52.0;
+    var circumference = 2 * Math.PI * radius;
+    var offset = circumference * (1 - Math.Clamp(Value, 0, 100) / 100.0);
+}
+
+<div class="score-ring @Tone" style="--ring-size:@(Size)px">
+    <svg viewBox="0 0 120 120">
+        <circle class="ring-track" cx="60" cy="60" r="@radius" />
+        <circle class="ring-bar" cx="60" cy="60" r="@radius"
+                stroke-dasharray="@circumference.ToString("0.##", CultureInfo.InvariantCulture)"
+                stroke-dashoffset="@offset.ToString("0.##", CultureInfo.InvariantCulture)" />
+    </svg>
+    <div class="ring-content">
+        <strong>@Value</strong>
+        <span>@(Label ?? "/ 100")</span>
+    </div>
+</div>
+
+@code {
+    [Parameter] public int Value { get; set; }
+    [Parameter] public int Size { get; set; } = 112;
+    [Parameter] public string? Label { get; set; }
+
+    private string Tone => Value >= 80 ? "great" : Value >= 60 ? "good" : Value >= 45 ? "warn" : "bad";
+}

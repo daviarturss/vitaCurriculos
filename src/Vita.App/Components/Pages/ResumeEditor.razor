@@ -1,0 +1,1046 @@
+@page "/resumes/{Id:guid}/edit"
+@attribute [Authorize]
+@inject UserSession Session
+@inject ResumeStore ResumeStore
+@inject AiAssistantService Ai
+@inject ToastService Toasts
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+
+<PageTitle>@(_title.Length > 0 ? _title : "Currículo") · Vita</PageTitle>
+
+@if (_loading)
+{
+    <div class="page-loader"><span class="spinner"></span></div>
+}
+else if (_notFound)
+{
+    <div class="empty-page">
+        <div class="empty-page-code">404</div>
+        <h1>Currículo não encontrado</h1>
+        <p>Ele pode ter sido excluído ou pertence a outra conta.</p>
+        <a class="btn btn-primary" href="/resumes">Voltar para currículos</a>
+    </div>
+}
+else
+{
+    <div class="editor-top">
+        <div class="crumbs">
+            <a href="/resumes">Currículos</a>
+            <Icon Name="chevron-right" Size="12" />
+            <span>Editar</span>
+        </div>
+        <div class="editor-title-row">
+            <input class="editor-title-input" @bind="_title" @bind:event="oninput" @bind:after="Touch" aria-label="Nome do currículo" />
+            <span class="save-state @(_saving ? "saving" : "")">
+                <span class="dot"></span>
+                @SaveLabel
+            </span>
+        </div>
+        <div class="row-wrap">
+            <span class="score-pill @ScoreTone"><b>@_score.Total</b> / 100</span>
+            <span class="chip"><Icon Name="layers" Size="12" /> @TemplateLabel(_template)</span>
+            <span class="chip"><Icon Name="globe" Size="12" /> @LanguageLabel(_language)</span>
+            <div class="spacer"></div>
+            <button class="btn btn-ghost btn-sm" @onclick="OpenScore">
+                <Icon Name="chart" Size="14" /> Diagnóstico
+            </button>
+            <button class="btn btn-ghost btn-sm" @onclick="OpenTailor">
+                <Icon Name="target" Size="14" /> Adaptar à vaga
+            </button>
+            <button class="btn btn-accent btn-sm" @onclick="OpenAi">
+                <Icon Name="sparkles" Size="14" /> Assistente IA
+            </button>
+        </div>
+    </div>
+
+    <div class="editor-grid">
+        <div class="editor-form">
+            <EditorSection Number="01" Title="Contato" Badge="@ContactBadge" Open="_openContact" OnToggle="() => _openContact = !_openContact">
+                <div class="form-grid">
+                    <label class="field span-2">
+                        <span>Nome completo</span>
+                        <input @bind="_document.Contact.FullName" @bind:event="oninput" @bind:after="Touch" placeholder="Seu nome" />
+                    </label>
+                    <label class="field span-2">
+                        <span>Título profissional</span>
+                        <input @bind="_document.Contact.Headline" @bind:event="oninput" @bind:after="Touch" placeholder="Ex.: Product Designer Sênior" />
+                    </label>
+                    <label class="field">
+                        <span>E-mail</span>
+                        <input type="email" @bind="_document.Contact.Email" @bind:after="Touch" placeholder="voce@email.com" />
+                    </label>
+                    <label class="field">
+                        <span>Telefone</span>
+                        <input @bind="_document.Contact.Phone" @bind:after="Touch" placeholder="+55 11 90000-0000" />
+                    </label>
+                    <label class="field">
+                        <span>Localização</span>
+                        <input @bind="_document.Contact.Location" @bind:after="Touch" placeholder="Cidade, Estado, País" />
+                    </label>
+                    <label class="field">
+                        <span>LinkedIn</span>
+                        <input @bind="_document.Contact.LinkedIn" @bind:after="Touch" placeholder="linkedin.com/in/voce" />
+                    </label>
+                    <label class="field">
+                        <span>Site ou portfólio</span>
+                        <input @bind="_document.Contact.Website" @bind:after="Touch" placeholder="seuportfolio.com" />
+                    </label>
+                    <label class="field">
+                        <span>GitHub</span>
+                        <input @bind="_document.Contact.Github" @bind:after="Touch" placeholder="github.com/voce" />
+                    </label>
+                </div>
+            </EditorSection>
+
+            <EditorSection Number="02" Title="Resumo profissional" Badge="@($"{TextAnalysis.WordCount(_document.Summary)} palavras")" Open="_openSummary" OnToggle="() => _openSummary = !_openSummary">
+                <label class="field">
+                    <span>Resumo</span>
+                    <textarea class="textarea" rows="5" @bind="_document.Summary" @bind:event="oninput" @bind:after="Touch"
+                              placeholder="3 a 5 linhas com sua especialidade, anos de experiência e um resultado concreto."></textarea>
+                </label>
+                <div class="mini-toolbar">
+                    <button class="btn btn-soft btn-sm" @onclick="ImproveSummaryAsync" disabled="@(_improving == "summary")">
+                        @if (_improving == "summary") { <span class="spinner spinner-sm spinner-dark"></span> } else { <Icon Name="wand" Size="14" /> }
+                        Melhorar com IA
+                    </button>
+                    <span class="hint-ai"><Icon Name="info" Size="12" /> Ideal entre 30 e 120 palavras.</span>
+                </div>
+            </EditorSection>
+
+            <EditorSection Number="03" Title="Experiência" Badge="@($"{_document.Experience.Count}")" Open="_openExperience" OnToggle="() => _openExperience = !_openExperience">
+                @for (var i = 0; i < _document.Experience.Count; i++)
+                {
+                    var exp = _document.Experience[i];
+                    var expIndex = i;
+                    <div class="item-card">
+                        <div class="item-card-head">
+                            <strong>Cargo @(i + 1)</strong>
+                            <span class="spacer"></span>
+                            @if (i > 0)
+                            {
+                                <button class="icon-btn" title="Mover para cima" @onclick="() => MoveExperience(expIndex, -1)"><Icon Name="chevron-down" Size="15" Class="flip" /></button>
+                            }
+                            @if (i < _document.Experience.Count - 1)
+                            {
+                                <button class="icon-btn" title="Mover para baixo" @onclick="() => MoveExperience(expIndex, 1)"><Icon Name="chevron-down" Size="15" /></button>
+                            }
+                            <button class="icon-btn danger" title="Remover" @onclick="() => RemoveExperience(expIndex)"><Icon Name="trash" Size="15" /></button>
+                        </div>
+                        <div class="form-grid">
+                            <label class="field"><span>Cargo</span><input @bind="exp.Role" @bind:after="Touch" placeholder="Product Designer" /></label>
+                            <label class="field"><span>Empresa</span><input @bind="exp.Company" @bind:after="Touch" placeholder="Nome da empresa" /></label>
+                        </div>
+                        <div class="form-grid-3">
+                            <label class="field"><span>Local</span><input @bind="exp.Location" @bind:after="Touch" placeholder="Remoto" /></label>
+                            <label class="field"><span>Início</span><input @bind="exp.StartDate" @bind:after="Touch" placeholder="AAAA-MM" /></label>
+                            <label class="field">
+                                <span>Fim</span>
+                                <input @bind="exp.EndDate" @bind:after="Touch" placeholder="AAAA-MM" disabled="@exp.Current" />
+                            </label>
+                        </div>
+                        <label class="checkbox-row">
+                            <input type="checkbox" @bind="exp.Current" @bind:after="Touch" />
+                            <span>Trabalho aqui atualmente</span>
+                        </label>
+                        <div class="field">
+                            <span>Realizações</span>
+                            @for (var b = 0; b < exp.Bullets.Count; b++)
+                            {
+                                var bulletIndex = b;
+                                <div class="bullet-row">
+                                    <textarea class="textarea" rows="2" @bind="exp.Bullets[bulletIndex]" @bind:event="oninput" @bind:after="Touch"
+                                              placeholder="Verbo de ação + o que fez + resultado mensurável."></textarea>
+                                    <button class="icon-btn" title="Melhorar com IA" @onclick="() => ImproveBulletAsync(exp, bulletIndex)" disabled="@(_improving == $"bullet-{expIndex}-{bulletIndex}")">
+                                        @if (_improving == $"bullet-{expIndex}-{bulletIndex}") { <span class="spinner spinner-sm spinner-dark"></span> } else { <Icon Name="wand" Size="15" /> }
+                                    </button>
+                                    <button class="icon-btn danger" title="Remover bullet" @onclick="() => RemoveBullet(exp, bulletIndex)"><Icon Name="trash" Size="15" /></button>
+                                </div>
+                            }
+                            <button class="add-row-btn" @onclick="() => AddBullet(exp)"><Icon Name="plus" Size="14" /> Adicionar realização</button>
+                        </div>
+                    </div>
+                }
+                <button class="btn btn-ghost btn-sm" @onclick="AddExperience"><Icon Name="plus" Size="15" /> Adicionar experiência</button>
+            </EditorSection>
+
+            <EditorSection Number="04" Title="Formação" Badge="@($"{_document.Education.Count}")" Open="_openEducation" OnToggle="() => _openEducation = !_openEducation">
+                @for (var i = 0; i < _document.Education.Count; i++)
+                {
+                    var edu = _document.Education[i];
+                    var eduIndex = i;
+                    <div class="item-card">
+                        <div class="item-card-head">
+                            <strong>Formação @(i + 1)</strong>
+                            <span class="spacer"></span>
+                            <button class="icon-btn danger" title="Remover" @onclick="() => RemoveEducation(eduIndex)"><Icon Name="trash" Size="15" /></button>
+                        </div>
+                        <div class="form-grid">
+                            <label class="field"><span>Instituição</span><input @bind="edu.Institution" @bind:after="Touch" placeholder="Universidade" /></label>
+                            <label class="field"><span>Curso / grau</span><input @bind="edu.Degree" @bind:after="Touch" placeholder="Bacharelado" /></label>
+                            <label class="field"><span>Área</span><input @bind="edu.Field" @bind:after="Touch" placeholder="Design Digital" /></label>
+                            <label class="field"><span>Local</span><input @bind="edu.Location" @bind:after="Touch" placeholder="São Paulo" /></label>
+                        </div>
+                        <div class="form-grid">
+                            <label class="field"><span>Início</span><input @bind="edu.StartDate" @bind:after="Touch" placeholder="AAAA-MM" /></label>
+                            <label class="field"><span>Conclusão</span><input @bind="edu.EndDate" @bind:after="Touch" placeholder="AAAA-MM" disabled="@edu.Current" /></label>
+                        </div>
+                        <label class="checkbox-row">
+                            <input type="checkbox" @bind="edu.Current" @bind:after="Touch" />
+                            <span>Cursando atualmente</span>
+                        </label>
+                        <label class="field"><span>Detalhes (opcional)</span><input @bind="edu.Details" @bind:after="Touch" placeholder="TCC, honras, atividades relevantes" /></label>
+                    </div>
+                }
+                <button class="btn btn-ghost btn-sm" @onclick="AddEducation"><Icon Name="plus" Size="15" /> Adicionar formação</button>
+            </EditorSection>
+
+            <EditorSection Number="05" Title="Competências" Badge="@($"{_document.AllSkills.Count()}")" Open="_openSkills" OnToggle="() => _openSkills = !_openSkills">
+                @for (var i = 0; i < _document.SkillGroups.Count; i++)
+                {
+                    var group = _document.SkillGroups[i];
+                    var groupIndex = i;
+                    <div class="item-card">
+                        <div class="item-card-head">
+                            <strong>Grupo @(i + 1)</strong>
+                            <span class="spacer"></span>
+                            <button class="icon-btn danger" title="Remover grupo" @onclick="() => RemoveSkillGroup(groupIndex)"><Icon Name="trash" Size="15" /></button>
+                        </div>
+                        <label class="field"><span>Nome do grupo</span><input @bind="group.Name" @bind:after="Touch" placeholder="Ferramentas" /></label>
+                        <label class="field">
+                            <span>Competências (separadas por vírgula)</span>
+                            <input value="@string.Join(", ", group.Items)" @onchange="e => SetSkills(group, e.Value?.ToString())" placeholder="Figma, Jira, Notion" />
+                        </label>
+                    </div>
+                }
+                <button class="btn btn-ghost btn-sm" @onclick="AddSkillGroup"><Icon Name="plus" Size="15" /> Adicionar grupo</button>
+            </EditorSection>
+
+            <EditorSection Number="06" Title="Projetos" Badge="@($"{_document.Projects.Count}")" Open="_openProjects" OnToggle="() => _openProjects = !_openProjects">
+                @for (var i = 0; i < _document.Projects.Count; i++)
+                {
+                    var project = _document.Projects[i];
+                    var projectIndex = i;
+                    <div class="item-card">
+                        <div class="item-card-head">
+                            <strong>Projeto @(i + 1)</strong>
+                            <span class="spacer"></span>
+                            <button class="icon-btn danger" title="Remover" @onclick="() => RemoveProject(projectIndex)"><Icon Name="trash" Size="15" /></button>
+                        </div>
+                        <div class="form-grid">
+                            <label class="field"><span>Nome</span><input @bind="project.Name" @bind:after="Touch" placeholder="Design System Aurora" /></label>
+                            <label class="field"><span>Link</span><input @bind="project.Link" @bind:after="Touch" placeholder="github.com/voce/projeto" /></label>
+                        </div>
+                        <label class="field"><span>Descrição</span><textarea class="textarea" rows="2" @bind="project.Description" @bind:after="Touch"></textarea></label>
+                        <div class="field">
+                            <span>Destaques</span>
+                            @for (var b = 0; b < project.Bullets.Count; b++)
+                            {
+                                var bulletIndex = b;
+                                <div class="bullet-row">
+                                    <textarea class="textarea" rows="2" @bind="project.Bullets[bulletIndex]" @bind:event="oninput" @bind:after="Touch"></textarea>
+                                    <button class="icon-btn danger" title="Remover" @onclick="() => RemoveProjectBullet(project, bulletIndex)"><Icon Name="trash" Size="15" /></button>
+                                </div>
+                            }
+                            <button class="add-row-btn" @onclick="() => project.Bullets.Add(string.Empty)"><Icon Name="plus" Size="14" /> Adicionar destaque</button>
+                        </div>
+                    </div>
+                }
+                <button class="btn btn-ghost btn-sm" @onclick="AddProject"><Icon Name="plus" Size="15" /> Adicionar projeto</button>
+            </EditorSection>
+
+            <EditorSection Number="07" Title="Certificações" Badge="@($"{_document.Certifications.Count}")" Open="_openCerts" OnToggle="() => _openCerts = !_openCerts">
+                @for (var i = 0; i < _document.Certifications.Count; i++)
+                {
+                    var cert = _document.Certifications[i];
+                    var certIndex = i;
+                    <div class="item-card">
+                        <div class="item-card-head">
+                            <strong>Certificação @(i + 1)</strong>
+                            <span class="spacer"></span>
+                            <button class="icon-btn danger" title="Remover" @onclick="() => _document.Certifications.RemoveAt(certIndex)"><Icon Name="trash" Size="15" /></button>
+                        </div>
+                        <div class="form-grid-3">
+                            <label class="field"><span>Nome</span><input @bind="cert.Name" @bind:after="Touch" /></label>
+                            <label class="field"><span>Emissor</span><input @bind="cert.Issuer" @bind:after="Touch" /></label>
+                            <label class="field"><span>Ano</span><input @bind="cert.Year" @bind:after="Touch" /></label>
+                        </div>
+                    </div>
+                }
+                <button class="btn btn-ghost btn-sm" @onclick="() => { _document.Certifications.Add(new CertificationItem()); Touch(); }"><Icon Name="plus" Size="15" /> Adicionar certificação</button>
+            </EditorSection>
+
+            <EditorSection Number="08" Title="Idiomas" Badge="@($"{_document.Languages.Count}")" Open="_openLanguages" OnToggle="() => _openLanguages = !_openLanguages">
+                @for (var i = 0; i < _document.Languages.Count; i++)
+                {
+                    var lang = _document.Languages[i];
+                    var langIndex = i;
+                    <div class="language-row">
+                        <input class="input" @bind="lang.Name" @bind:after="Touch" placeholder="Inglês" />
+                        <input class="input" @bind="lang.Level" @bind:after="Touch" placeholder="Avançado (C1)" />
+                        <button class="icon-btn danger" title="Remover" @onclick="() => _document.Languages.RemoveAt(langIndex)"><Icon Name="trash" Size="15" /></button>
+                    </div>
+                }
+                <button class="btn btn-ghost btn-sm" @onclick="() => { _document.Languages.Add(new LanguageItem()); Touch(); }"><Icon Name="plus" Size="15" /> Adicionar idioma</button>
+            </EditorSection>
+
+            <EditorSection Number="09" Title="Seções extras" Badge="@($"{_document.CustomSections.Count}")" Open="_openCustom" OnToggle="() => _openCustom = !_openCustom">
+                @for (var i = 0; i < _document.CustomSections.Count; i++)
+                {
+                    var section = _document.CustomSections[i];
+                    var sectionIndex = i;
+                    <div class="item-card">
+                        <div class="item-card-head">
+                            <strong>Seção @(i + 1)</strong>
+                            <span class="spacer"></span>
+                            <button class="icon-btn danger" title="Remover" @onclick="() => _document.CustomSections.RemoveAt(sectionIndex)"><Icon Name="trash" Size="15" /></button>
+                        </div>
+                        <label class="field"><span>Título</span><input @bind="section.Title" @bind:after="Touch" placeholder="Voluntariado, Publicações…" /></label>
+                        <label class="field">
+                            <span>Itens (um por linha)</span>
+                            <textarea class="textarea" rows="3" value="@string.Join("\n", section.Items)" @onchange="e => SetCustomItems(section, e.Value?.ToString())"></textarea>
+                        </label>
+                    </div>
+                }
+                <button class="btn btn-ghost btn-sm" @onclick="AddCustomSection"><Icon Name="plus" Size="15" /> Adicionar seção</button>
+            </EditorSection>
+
+            <div class="row-between" style="padding:8px 2px 20px">
+                <button class="btn btn-danger-ghost btn-sm" @onclick="() => _deleteOpen = true"><Icon Name="trash" Size="14" /> Excluir currículo</button>
+                <div class="row" style="gap:8px">
+                    <button class="btn btn-ghost btn-sm" @onclick='() => Nav.NavigateTo("/resumes")'>Voltar</button>
+                    <button class="btn btn-primary btn-sm" @onclick="SaveNowAsync" disabled="@_saving">
+                        @if (_saving) { <span class="spinner spinner-sm"></span> } else { <Icon Name="save" Size="14" /> }
+                        Salvar agora
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <aside class="preview-pane">
+            <div class="preview-toolbar">
+                <select class="select" @bind="_template" @bind:after="TemplateChanged" aria-label="Modelo">
+                    <option value="aurora">Aurora</option>
+                    <option value="classico">Clássico</option>
+                    <option value="minimal">Minimal</option>
+                    <option value="compacto">Compacto</option>
+                </select>
+                <div class="color-row">
+                    @foreach (var color in Palette)
+                    {
+                        <button type="button" class="color-dot @(_accent == color ? "active" : "")" style="background:@color;width:18px;height:18px" @onclick="() => SetAccent(color)" title="Cor de destaque"></button>
+                    }
+                </div>
+                <div class="spacer"></div>
+                <a class="icon-btn" title="Baixar PDF" href="@($"/api/resumes/{Id}/pdf")"><Icon Name="download" Size="16" /></a>
+                <a class="icon-btn" title="Baixar DOCX" href="@($"/api/resumes/{Id}/docx")"><Icon Name="document" Size="16" /></a>
+                <button class="icon-btn" title="Imprimir" @onclick="Print"><Icon Name="eye" Size="16" /></button>
+            </div>
+            <div class="paper-frame" @ref="_frame">
+                <div class="paper">
+                    <ResumePreview Document="_document" TemplateId="_template" Accent="_accent" Language="_language" />
+                </div>
+            </div>
+            <div class="row-between" style="padding:2px 4px">
+                <span class="preview-zoom">A4 · @_document.Experience.Count experiência(s) · @TextAnalysis.WordCount(_document.ToPlainText()) palavras</span>
+                <select class="select" style="width:auto;height:30px;padding:2px 28px 2px 8px;font-size:11.5px" @bind="_language" @bind:after="Touch">
+                    <option value="pt">Português</option>
+                    <option value="en">English</option>
+                    <option value="es">Español</option>
+                </select>
+            </div>
+        </aside>
+    </div>
+}
+
+@if (_scoreOpen)
+{
+    <div class="drawer-scrim" @onclick="() => _scoreOpen = false"></div>
+    <aside class="drawer drawer-wide" role="dialog" aria-modal="true">
+        <div class="drawer-head">
+            <span class="eyebrow"><Icon Name="chart" Size="13" /> Diagnóstico</span>
+            <button class="icon-btn" @onclick="() => _scoreOpen = false" aria-label="Fechar"><Icon Name="x" Size="18" /></button>
+        </div>
+        <div class="drawer-body">
+            <div class="score-hero">
+                <ScoreRing Value="_score.Total" Size="104" />
+                <div>
+                    <h2>@_score.Label</h2>
+                    <p>@_score.Verdict</p>
+                </div>
+            </div>
+
+            <div class="score-cats">
+                @foreach (var category in _score.Categories)
+                {
+                    <div class="score-cat">
+                        <div class="score-cat-head"><span>@category.Name</span><b>@category.Score/@category.Max</b></div>
+                        <div class="score-bar-track"><div class="score-bar-fill @CatTone(category)" style="width:@(Percent(category))%"></div></div>
+                        <p>@category.Summary</p>
+                    </div>
+                }
+            </div>
+
+            @if (_score.Issues.Count > 0)
+            {
+                <div class="drawer-subhead">
+                    <strong>O que corrigir</strong>
+                    <span class="tiny muted">@_score.Issues.Count ponto(s)</span>
+                </div>
+                <div class="issue-list">
+                    @foreach (var issue in _score.Issues)
+                    {
+                        <div class="issue @issue.Severity">
+                            <div class="issue-icon">
+                                <Icon Name="@(issue.Severity == "critical" ? "alert" : issue.Severity == "warning" ? "info" : "wand")" Size="15" />
+                            </div>
+                            <div class="issue-main">
+                                <strong>@issue.Title <span class="severity @issue.Severity">@SeverityLabel(issue.Severity)</span></strong>
+                                <p>@issue.Detail</p>
+                                <div class="issue-fix">@issue.Fix</div>
+                                <button class="btn btn-ghost btn-xs" style="margin-top:7px" @onclick="() => AskAi(issue.Fix)">
+                                    <Icon Name="sparkles" Size="12" /> Corrigir com a IA
+                                </button>
+                            </div>
+                        </div>
+                    }
+                </div>
+            }
+            else
+            {
+                <div class="alert alert-info"><Icon Name="check" Size="16" /><span>Nenhum ponto crítico. Adapte as palavras-chave para cada vaga antes de aplicar.</span></div>
+            }
+        </div>
+    </aside>
+}
+
+@if (_tailorOpen)
+{
+    <Modal Open="_tailorOpen" Title="Adaptar à vaga" Subtitle="A Vita reorganiza o que já existe, destaca palavras-chave e ajusta o resumo. Nada é inventado." OnClose="CloseTailor" Size="lg">
+        <ChildContent>
+            @if (_pending is null)
+            {
+                <div class="form-grid">
+                    <label class="field"><span>Cargo da vaga</span><input @bind="_jobTitle" placeholder="Product Designer Sênior" /></label>
+                    <label class="field"><span>Empresa</span><input @bind="_company" placeholder="Nome da empresa" /></label>
+                </div>
+                <label class="field">
+                    <span>Descrição da vaga</span>
+                    <textarea class="textarea" rows="8" @bind="_jobDraft" placeholder="Cole a descrição completa da vaga…"></textarea>
+                </label>
+                <div class="row-wrap">
+                    <span class="hint-ai"><Icon Name="info" Size="12" /> A adaptação local funciona sem IA.</span>
+                </div>
+                @if (!string.IsNullOrWhiteSpace(_tailorError))
+                {
+                    <div class="alert alert-error"><Icon Name="alert" Size="16" /><span>@_tailorError</span></div>
+                }
+                <div class="tailor-actions">
+                    <button class="btn btn-soft" @onclick="TailorLocal" disabled="@_tailoring">
+                        <Icon Name="target" Size="15" /> Adaptar localmente
+                    </button>
+                    <button class="btn btn-accent" @onclick="TailorWithAi" disabled="@_tailoring">
+                        @if (_tailoring) { <span class="spinner spinner-sm"></span> } else { <Icon Name="sparkles" Size="15" /> }
+                        Adaptar com IA
+                    </button>
+                </div>
+            }
+            else
+            {
+                @if (_coverage is not null)
+                {
+                    <div class="coverage-box">
+                        <div class="coverage-head">
+                            <strong>Aderência à vaga</strong>
+                            <span class="badge @(_coverage.Percent >= 70 ? "badge-soft" : _coverage.Percent >= 45 ? "badge-sun" : "badge-clay")">@_coverage.Percent%</span>
+                        </div>
+                        <div class="score-bar-track"><div class="score-bar-fill" style="width:@_coverage.Percent%"></div></div>
+                        <div class="chip-row" style="margin-top:9px">
+                            @foreach (var keyword in _coverage.Matched.Take(12))
+                            {
+                                <span class="chip match"><Icon Name="check" Size="11" /> @keyword</span>
+                            }
+                            @foreach (var keyword in _coverage.Missing.Take(10))
+                            {
+                                <span class="chip missing">@keyword</span>
+                            }
+                        </div>
+                    </div>
+                }
+
+                @if (_tailorChanges is { Count: > 0 })
+                {
+                    <div class="drawer-subhead"><strong>Mudanças propostas</strong><span class="tiny muted">@_tailorChanges.Count</span></div>
+                    <div class="diff-list">
+                        @foreach (var change in _tailorChanges)
+                        {
+                            <div class="diff-item">
+                                <div class="diff-head"><span>@change.Section · @change.Title</span></div>
+                                @if (!string.IsNullOrWhiteSpace(change.Before)) { <div class="diff-before">@change.Before</div> }
+                                @if (!string.IsNullOrWhiteSpace(change.After)) { <div class="diff-after">@change.After</div> }
+                                <div class="diff-reason">@change.Reason</div>
+                            </div>
+                        }
+                    </div>
+                }
+                else if (_diff is { Count: > 0 })
+                {
+                    <div class="drawer-subhead"><strong>Mudanças propostas</strong><span class="tiny muted">@_diff.Count</span></div>
+                    <div class="diff-list">
+                        @foreach (var item in _diff)
+                        {
+                            <div class="diff-item">
+                                <div class="diff-head"><span>@item.Section · @item.Label</span><span>@DiffKind(item.Kind)</span></div>
+                                @if (!string.IsNullOrWhiteSpace(item.Before)) { <div class="diff-before">@item.Before</div> }
+                                @if (!string.IsNullOrWhiteSpace(item.After)) { <div class="diff-after">@item.After</div> }
+                            </div>
+                        }
+                    </div>
+                }
+                else
+                {
+                    <div class="alert alert-warn"><Icon Name="info" Size="16" /><span>Nenhuma alteração textual foi necessária. O currículo já está alinhado a esta vaga.</span></div>
+                }
+            }
+        </ChildContent>
+        <Footer>
+            @if (_pending is null)
+            {
+                <button class="btn btn-ghost" @onclick="CloseTailor">Cancelar</button>
+            }
+            else
+            {
+                <button class="btn btn-ghost" @onclick="ResetTailor"><Icon Name="refresh" Size="14" /> Tentar outra vaga</button>
+                <button class="btn btn-primary" @onclick="ApplyTailor"><Icon Name="check" Size="15" /> Aplicar ao currículo</button>
+            }
+        </Footer>
+    </Modal>
+}
+
+@if (_aiOpen)
+{
+    <div class="drawer-scrim" @onclick="CloseAi"></div>
+    <aside class="drawer" role="dialog" aria-modal="true">
+        <div class="drawer-head">
+            <span class="ai-orb"><Icon Name="sparkles" Size="15" /></span>
+            <div style="min-width:0">
+                <h2>Assistente Vita</h2>
+                <span class="tiny muted">Edite conversando</span>
+            </div>
+            <button class="icon-btn" @onclick="CloseAi" aria-label="Fechar"><Icon Name="x" Size="18" /></button>
+        </div>
+        <ChatPanel Compact="true"
+                   Resume="_document"
+                   ResumeId="Id"
+                   JobDescription="_jobDraftForAi"
+                   DraftPrompt="_aiDraft"
+                   OnResumeChanged="AiResumeChanged"
+                   EmptyTitle="O que vamos ajustar?"
+                   EmptyText="Peça uma reescrita, uma versão mais concisa ou alinhamento com a vaga. Cada mudança vem com prévia." />
+    </aside>
+}
+
+<Modal Open="_deleteOpen" Title="Excluir currículo?" Subtitle="Esta ação não pode ser desfeita." OnClose="() => _deleteOpen = false">
+    <ChildContent>
+        <div class="alert alert-warn">
+            <Icon Name="alert" Size="17" />
+            <span>O currículo <strong>@_title</strong> será removido. As candidaturas continuam salvas.</span>
+        </div>
+    </ChildContent>
+    <Footer>
+        <button class="btn btn-ghost" @onclick="() => _deleteOpen = false">Cancelar</button>
+        <button class="btn btn-danger" @onclick="DeleteResume">Excluir definitivamente</button>
+    </Footer>
+</Modal>
+
+@code {
+    [Parameter] public Guid Id { get; set; }
+
+    private static readonly string[] Palette = { "#1F6F5C", "#2F5D8A", "#B5502F", "#7A4B7E", "#3A3A33", "#A8762A" };
+
+    private AppUser? _user;
+    private ResumeEntity? _entity;
+    private ResumeDocument _document = new();
+    private ResumeScore _score = new(0, "—", "", Array.Empty<ScoreCategory>(), Array.Empty<ScoreIssue>(), null);
+    private string _title = string.Empty;
+    private string _template = "aurora";
+    private string _accent = "#1F6F5C";
+    private string _language = "pt";
+    private bool _loading = true;
+    private bool _notFound;
+    private bool _saving;
+    private bool _dirty;
+    private DateTime? _lastSaved;
+    private CancellationTokenSource? _saveCts;
+    private ElementReference _frame;
+    private bool _fitDone;
+
+    private bool _openContact = true, _openSummary = true, _openExperience = true, _openEducation = true,
+        _openSkills = true, _openProjects = false, _openCerts = false, _openLanguages = false, _openCustom = false;
+
+    private bool _scoreOpen, _tailorOpen, _aiOpen, _deleteOpen;
+    private string? _improving;
+
+    private string _jobDraft = string.Empty;
+    private string _jobTitle = string.Empty;
+    private string _company = string.Empty;
+    private string? _jobDraftForAi;
+    private string? _aiDraft;
+    private bool _tailoring;
+    private string? _tailorError;
+    private ResumeDocument? _pending;
+    private List<ResumeDiffItem>? _diff;
+    private List<TailorChange>? _tailorChanges;
+    private KeywordCoverage? _coverage;
+
+    [SupplyParameterFromQuery(Name = "tailor")] public string? TailorQuery { get; set; }
+    [SupplyParameterFromQuery(Name = "job")] public string? JobQuery { get; set; }
+    [SupplyParameterFromQuery(Name = "role")] public string? RoleQuery { get; set; }
+    [SupplyParameterFromQuery(Name = "company")] public string? CompanyQuery { get; set; }
+
+    private string ContactBadge => TextAnalysis.LooksLikeEmail(_document.Contact.Email) ? "Completo" : "Revisar";
+    private string SaveLabel => _saving ? "Salvando…" : _dirty ? "Alterações não salvas" : _lastSaved is { } t ? $"Salvo às {t:HH:mm}" : "Salvo";
+    private string ScoreTone => _score.Total >= 80 ? "" : _score.Total >= 60 ? "warn" : "bad";
+
+    protected override async Task OnInitializedAsync()
+    {
+        _user = await Session.GetUserAsync();
+        if (_user is null) return;
+        _entity = await ResumeStore.GetAsync(Id, _user.Id);
+        if (_entity is null)
+        {
+            _notFound = true;
+            _loading = false;
+            return;
+        }
+        _document = Json.Deserialize<ResumeDocument>(_entity.DataJson) ?? new ResumeDocument();
+        _title = _entity.Title;
+        _template = _entity.TemplateId;
+        _accent = _entity.AccentColor;
+        _language = _entity.Language;
+        _lastSaved = _entity.UpdatedAt.ToLocalTime();
+        RefreshScore();
+        _loading = false;
+        if (!string.IsNullOrWhiteSpace(JobQuery)) _jobDraft = JobQuery;
+        if (!string.IsNullOrWhiteSpace(RoleQuery)) _jobTitle = RoleQuery;
+        if (!string.IsNullOrWhiteSpace(CompanyQuery)) _company = CompanyQuery;
+        if (TailorQuery == "1") OpenTailor();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_fitDone || _loading || _notFound) return;
+        _fitDone = true;
+        try
+        {
+            await JS.InvokeVoidAsync("vita.fitPreview", _frame);
+        }
+        catch { }
+    }
+
+    public void Dispose()
+    {
+        _saveCts?.Cancel();
+        _saveCts?.Dispose();
+    }
+
+    private void Touch()
+    {
+        if (_loading) return;
+        _dirty = true;
+        RefreshScore();
+        _saveCts?.Cancel();
+        _saveCts?.Dispose();
+        _saveCts = new CancellationTokenSource();
+        var token = _saveCts.Token;
+        _ = DebouncedSaveAsync(token);
+    }
+
+    private async Task DebouncedSaveAsync(CancellationToken token)
+    {
+        try
+        {
+            await Task.Delay(800, token);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        if (token.IsCancellationRequested) return;
+        await InvokeAsync(SaveNowAsync);
+    }
+
+    private async Task SaveNowAsync()
+    {
+        if (_user is null || _entity is null) return;
+        _saving = true;
+        StateHasChanged();
+        try
+        {
+            await ResumeStore.SaveAsync(Id, _user.Id, _document, _title, _template, _accent, _language);
+            _dirty = false;
+            _lastSaved = DateTime.Now;
+        }
+        catch (Exception)
+        {
+            Toasts.Error("Não foi possível salvar. Verifique o espaço em disco e tente novamente.");
+        }
+        finally
+        {
+            _saving = false;
+            StateHasChanged();
+        }
+    }
+
+    private void RefreshScore() => _score = ResumeScorer.Analyze(_document);
+
+    private void TemplateChanged() => Touch();
+
+    private void SetAccent(string color)
+    {
+        _accent = color;
+        Touch();
+    }
+
+    private void Print() => JS.InvokeVoidAsync("vita.printPage");
+
+    private static int Percent(ScoreCategory category) =>
+        category.Max == 0 ? 0 : (int)Math.Round(100.0 * category.Score / category.Max);
+
+    private static string CatTone(ScoreCategory category)
+    {
+        var pct = Percent(category);
+        return pct >= 75 ? "" : pct >= 50 ? "warn" : "bad";
+    }
+
+    private static string SeverityLabel(string severity) => severity switch
+    {
+        "critical" => "Crítico",
+        "warning" => "Atenção",
+        _ => "Dica"
+    };
+
+    private static string DiffKind(string kind) => kind switch
+    {
+        "added" => "Adicionado",
+        "removed" => "Removido",
+        _ => "Alterado"
+    };
+
+    private static string TemplateLabel(string id) => id switch
+    {
+        "classico" => "Clássico",
+        "minimal" => "Minimal",
+        "compacto" => "Compacto",
+        _ => "Aurora"
+    };
+
+    private static string LanguageLabel(string language) => language switch
+    {
+        "en" => "English",
+        "es" => "Español",
+        _ => "Português"
+    };
+
+    // ---------------------------------------------------------------- experience
+    private void AddExperience()
+    {
+        _document.Experience.Add(new ExperienceItem());
+        _openExperience = true;
+        Touch();
+    }
+
+    private void RemoveExperience(int index)
+    {
+        if (index < 0 || index >= _document.Experience.Count) return;
+        _document.Experience.RemoveAt(index);
+        Touch();
+    }
+
+    private void MoveExperience(int index, int direction)
+    {
+        var target = index + direction;
+        if (target < 0 || target >= _document.Experience.Count) return;
+        (_document.Experience[index], _document.Experience[target]) = (_document.Experience[target], _document.Experience[index]);
+        Touch();
+    }
+
+    private void AddBullet(ExperienceItem exp)
+    {
+        exp.Bullets.Add(string.Empty);
+        Touch();
+    }
+
+    private void RemoveBullet(ExperienceItem exp, int index)
+    {
+        if (index < 0 || index >= exp.Bullets.Count) return;
+        exp.Bullets.RemoveAt(index);
+        Touch();
+    }
+
+    // ---------------------------------------------------------------- education
+    private void AddEducation()
+    {
+        _document.Education.Add(new EducationItem());
+        _openEducation = true;
+        Touch();
+    }
+
+    private void RemoveEducation(int index)
+    {
+        if (index < 0 || index >= _document.Education.Count) return;
+        _document.Education.RemoveAt(index);
+        Touch();
+    }
+
+    // ---------------------------------------------------------------- skills/projects
+    private void AddSkillGroup()
+    {
+        _document.SkillGroups.Add(new SkillGroup { Name = "Competências" });
+        _openSkills = true;
+        Touch();
+    }
+
+    private void RemoveSkillGroup(int index)
+    {
+        if (index < 0 || index >= _document.SkillGroups.Count) return;
+        _document.SkillGroups.RemoveAt(index);
+        Touch();
+    }
+
+    private void SetSkills(SkillGroup group, string? value)
+    {
+        group.Items = (value ?? string.Empty)
+            .Split(',', StringSplitOptions.RemoveEmptyEntries)
+            .Select(s => s.Trim())
+            .Where(s => s.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        Touch();
+    }
+
+    private void AddProject()
+    {
+        _document.Projects.Add(new ProjectItem());
+        _openProjects = true;
+        Touch();
+    }
+
+    private void RemoveProject(int index)
+    {
+        if (index < 0 || index >= _document.Projects.Count) return;
+        _document.Projects.RemoveAt(index);
+        Touch();
+    }
+
+    private void RemoveProjectBullet(ProjectItem project, int index)
+    {
+        if (index < 0 || index >= project.Bullets.Count) return;
+        project.Bullets.RemoveAt(index);
+        Touch();
+    }
+
+    private void AddCustomSection()
+    {
+        _document.CustomSections.Add(new CustomSection { Title = "Nova seção" });
+        _openCustom = true;
+        Touch();
+    }
+
+    private void SetCustomItems(CustomSection section, string? value)
+    {
+        section.Items = (value ?? string.Empty)
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .Select(s => s.Trim())
+            .Where(s => s.Length > 0)
+            .ToList();
+        Touch();
+    }
+
+    // ---------------------------------------------------------------- AI
+    private void OpenAi()
+    {
+        _scoreOpen = false;
+        _aiDraft = null;
+        _aiOpen = true;
+    }
+
+    private void OpenScore()
+    {
+        _aiOpen = false;
+        _scoreOpen = true;
+    }
+
+    private void CloseAi() => _aiOpen = false;
+
+    private void AskAi(string prompt)
+    {
+        _scoreOpen = false;
+        _aiDraft = prompt;
+        _aiOpen = true;
+    }
+
+    private async Task AiResumeChanged(ResumeDocument document)
+    {
+        _document = document;
+        RefreshScore();
+        await SaveNowAsync();
+    }
+
+    private async Task ImproveSummaryAsync()
+    {
+        if (_user is null || string.IsNullOrWhiteSpace(_document.Summary)) return;
+        _improving = "summary";
+        try
+        {
+            var improved = await Ai.ImproveTextAsync(_user.Id, _document.Summary, "Resumo profissional do currículo", _jobDraftForAi);
+            if (!string.IsNullOrWhiteSpace(improved))
+            {
+                _document.Summary = improved;
+                Touch();
+                Toasts.Success("Resumo reescrito. Revise e ajuste se quiser.");
+            }
+        }
+        catch (AiException ex)
+        {
+            Toasts.Error(ex.Message);
+        }
+        finally
+        {
+            _improving = null;
+        }
+    }
+
+    private async Task ImproveBulletAsync(ExperienceItem exp, int bulletIndex)
+    {
+        if (_user is null || bulletIndex < 0 || bulletIndex >= exp.Bullets.Count) return;
+        var text = exp.Bullets[bulletIndex];
+        if (string.IsNullOrWhiteSpace(text)) return;
+        var key = $"bullet-{_document.Experience.IndexOf(exp)}-{bulletIndex}";
+        _improving = key;
+        try
+        {
+            var improved = await Ai.ImproveTextAsync(_user.Id, text, $"Realização no cargo {exp.Role} na empresa {exp.Company}", _jobDraftForAi);
+            if (!string.IsNullOrWhiteSpace(improved))
+            {
+                exp.Bullets[bulletIndex] = improved;
+                Touch();
+                Toasts.Success("Bullet reescrito com mais impacto.");
+            }
+        }
+        catch (AiException ex)
+        {
+            Toasts.Error(ex.Message);
+        }
+        finally
+        {
+            _improving = null;
+        }
+    }
+
+    // ---------------------------------------------------------------- tailoring
+    private void OpenTailor()
+    {
+        _scoreOpen = false;
+        _aiOpen = false;
+        _tailorError = null;
+        _pending = null;
+        _diff = null;
+        _tailorChanges = null;
+        _coverage = null;
+        _jobTitle = _jobTitle.Length > 0 ? _jobTitle : string.IsNullOrWhiteSpace(_document.Contact.Headline) ? string.Empty : _document.Contact.Headline;
+        _jobDraft = _jobDraft.Length > 0 ? _jobDraft : string.Empty;
+        _tailorOpen = true;
+    }
+
+    private void CloseTailor()
+    {
+        _tailorOpen = false;
+        _tailoring = false;
+    }
+
+    private void ResetTailor()
+    {
+        _pending = null;
+        _diff = null;
+        _tailorChanges = null;
+        _coverage = null;
+        _tailorError = null;
+    }
+
+    private void TailorLocal()
+    {
+        _tailorError = null;
+        if (string.IsNullOrWhiteSpace(_jobDraft))
+        {
+            _tailorError = "Cole a descrição da vaga para adaptar o currículo.";
+            return;
+        }
+        try
+        {
+            var result = ResumeTailor.ApplyLocal(_document, _jobDraft, _jobTitle, _company);
+            _pending = result.Document;
+            _coverage = result.Coverage;
+            _tailorChanges = result.Changes;
+            _diff = ResumeDiff.Compare(_document, result.Document);
+        }
+        catch (Exception)
+        {
+            _tailorError = "Não foi possível adaptar o currículo. Tente novamente.";
+        }
+    }
+
+    private async Task TailorWithAi()
+    {
+        if (_user is null) return;
+        _tailorError = null;
+        if (string.IsNullOrWhiteSpace(_jobDraft))
+        {
+            _tailorError = "Cole a descrição da vaga para adaptar o currículo.";
+            return;
+        }
+        _tailoring = true;
+        try
+        {
+            var instruction = $"Adapte este currículo para a vaga de {_jobTitle} na empresa {_company}. " +
+                              "Reescreva o resumo, o título profissional e os bullets para destacar as competências que a vaga pede, " +
+                              "usando apenas fatos já presentes no currículo. Reordene as competências para colocar as mais relevantes primeiro. " +
+                              "Não invente empresas, datas, formações ou métricas.";
+            var result = await Ai.EditAsync(_user.Id, _document, instruction, _jobDraft);
+            _pending = result.Document;
+            _diff = result.Changes;
+            _tailorChanges = null;
+            _coverage = TextAnalysis.Coverage(result.Document.ToPlainText(), _jobDraft);
+        }
+        catch (AiException ex)
+        {
+            _tailorError = ex.Message + " Você também pode usar a adaptação local, que funciona sem IA.";
+        }
+        finally
+        {
+            _tailoring = false;
+        }
+    }
+
+    private async Task ApplyTailor()
+    {
+        if (_pending is null) return;
+        _document = _pending;
+        _jobDraftForAi = string.IsNullOrWhiteSpace(_jobDraft) ? null : _jobDraft;
+        _pending = null;
+        _tailorOpen = false;
+        RefreshScore();
+        await SaveNowAsync();
+        Toasts.Success("Currículo adaptado à vaga. Revise o resultado no preview.");
+    }
+
+    // ---------------------------------------------------------------- delete
+    private async Task DeleteResume()
+    {
+        if (_user is null) return;
+        await ResumeStore.DeleteAsync(Id, _user.Id);
+        _deleteOpen = false;
+        Toasts.Success("Currículo excluído.");
+        Nav.NavigateTo("/resumes");
+    }
+}

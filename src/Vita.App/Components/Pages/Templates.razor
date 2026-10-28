@@ -1,0 +1,234 @@
+@page "/templates"
+@attribute [Authorize]
+@inject UserSession Session
+@inject ResumeStore Resumes
+@inject ToastService Toasts
+@inject NavigationManager Nav
+
+<PageTitle>Modelos · Vita</PageTitle>
+
+<div class="page-head">
+    <div class="page-head-main">
+        <span class="eyebrow"><span class="dot"></span> Quatro direções, um currículo</span>
+        <h1 class="page-title">Modelos que deixam o conteúdo <em>protagonista</em></h1>
+        <p class="page-sub">Todos os modelos são legíveis por ATS, exportam em PDF e DOCX e usam a mesma estrutura de dados. Troque quando quiser sem perder nada.</p>
+    </div>
+</div>
+
+<div class="template-grid">
+    @foreach (var template in TemplateList)
+    {
+        <article class="card template-card">
+            <div class="template-preview template-thumb">
+                <div class="tpl-frame">
+                    <ResumePreview Document="_sample" TemplateId="@template.Id" Accent="@PreviewAccent(template.Id)" />
+                </div>
+                <span class="template-badge">@template.Tag</span>
+            </div>
+            <div class="template-info">
+                <div>
+                    <h3>@template.Name</h3>
+                    <p>@template.Description</p>
+                </div>
+                <span class="badge @(template.Ats ? "badge-soft" : "badge-outline")">@(template.Ats ? "ATS forte" : "Editorial")</span>
+            </div>
+            <div class="template-points">
+                @foreach (var point in template.Points)
+                {
+                    <span class="tiny muted"><Icon Name="check" Size="12" /> @point</span>
+                }
+            </div>
+            <button class="btn btn-soft btn-sm btn-block" @onclick="() => OpenUse(template)">
+                <Icon Name="layers" Size="14" /> Usar este modelo
+            </button>
+        </article>
+    }
+</div>
+
+<section class="card card-pad template-guide">
+    <div class="section-head">
+        <h2>Qual escolher?</h2>
+        <span class="tiny muted">Você pode trocar de modelo a qualquer momento no editor.</span>
+    </div>
+    <div class="grid grid-2">
+        <div class="template-guide-item">
+            <span class="issue-icon tip"><Icon Name="target" Size="16" /></span>
+            <div>
+                <strong>Vagas com triagem automática</strong>
+                <p>Prefira <b>Compacto</b> ou <b>Minimal</b>: uma coluna, títulos claros e nenhum elemento gráfico que confunda o parser.</p>
+            </div>
+        </div>
+        <div class="template-guide-item">
+            <span class="issue-icon tip"><Icon Name="briefcase" Size="16" /></span>
+            <div>
+                <strong>Produto, design e marketing</strong>
+                <p><b>Aurora</b> organiza contato e competências na lateral e deixa a experiência em destaque. Bom para portfólios e vagas criativas.</p>
+            </div>
+        </div>
+        <div class="template-guide-item">
+            <span class="issue-icon tip"><Icon Name="award" Size="16" /></span>
+            <div>
+                <strong>Jurídico, acadêmico e executivo</strong>
+                <p><b>Clássico</b> usa tipografia editorial e alinhamento central. Transmite solidez sem parecer antiquado.</p>
+            </div>
+        </div>
+        <div class="template-guide-item">
+            <span class="issue-icon tip"><Icon Name="globe" Size="16" /></span>
+            <div>
+                <strong>Candidaturas internacionais</strong>
+                <p>Todos os modelos aceitam currículo em inglês ou espanhol. O Compacto é o mais próximo do formato norte-americano.</p>
+            </div>
+        </div>
+    </div>
+</section>
+
+<Modal Open="_useOpen" Title="@($"Usar o modelo {_template?.Name}")" Subtitle="Escolha o ponto de partida. O conteúdo atual nunca é sobrescrito: criamos um novo currículo." OnClose="() => _useOpen = false" Size="lg">
+    <ChildContent>
+        <div class="field">
+            <span>Nome do novo currículo</span>
+            <input @bind="_newTitle" placeholder="Ex.: Product Designer · Aurora" />
+        </div>
+
+        <div class="field">
+            <span>Ponto de partida</span>
+            <div class="segmented">
+                <button class="@(_source == "blank" ? "active" : "")" @onclick='() => _source = "blank"'>Em branco</button>
+                @if (_resumes.Count > 0)
+                {
+                    <button class="@(_source == "resume" ? "active" : "")" @onclick='() => _source = "resume"'>Meu currículo</button>
+                }
+            </div>
+        </div>
+
+        @if (_source == "resume" && _resumes.Count > 0)
+        {
+            <label class="field">
+                <span>Currículo base</span>
+                <select class="select" @bind="_baseResumeId">
+                    @foreach (var resume in _resumes)
+                    {
+                        <option value="@resume.Id">@resume.Title</option>
+                    }
+                </select>
+            </label>
+        }
+
+        <div class="form-grid">
+            <div class="field">
+                <span>Idioma</span>
+                <select class="select" @bind="_language">
+                    <option value="pt">Português</option>
+                    <option value="en">English</option>
+                    <option value="es">Español</option>
+                </select>
+            </div>
+            <div class="field">
+                <span>Cor de destaque</span>
+                <div class="color-row" style="height:40px">
+                    @foreach (var color in Palette)
+                    {
+                        <button type="button" class="color-dot @(_accent == color ? "active" : "")" style="background:@color" @onclick="() => _accent = color"></button>
+                    }
+                </div>
+            </div>
+        </div>
+    </ChildContent>
+    <Footer>
+        <button class="btn btn-ghost" @onclick="() => _useOpen = false">Cancelar</button>
+        <button class="btn btn-primary" @onclick="CreateFromTemplate" disabled="@_busy">
+            @if (_busy) { <span class="spinner spinner-sm"></span> }
+            Criar e abrir editor
+        </button>
+    </Footer>
+</Modal>
+
+@code {
+    private sealed record TemplateInfo(string Id, string Name, string Description, string Tag, bool Ats, string[] Points);
+
+    private static readonly TemplateInfo[] TemplateList =
+    {
+        new("aurora", "Aurora", "Duas colunas com cabeçalho colorido. Contato e competências na lateral, experiência em destaque.", "Mais escolhido", true,
+            new[] { "Cabeçalho com cor de destaque", "Boa densidade de informação", "Funciona em PT, EN e ES" }),
+        new("classico", "Clássico", "Editorial, centrado e sóbrio. Tipografia serifada e hierarquia discreta.", "Editorial", true,
+            new[] { "Leitura confortável", "Ótimo para cargos sêniores", "Sem elementos gráficos" }),
+        new("minimal", "Minimal", "Muito espaço em branco e hierarquia tipográfica. Deixa o conteúdo respirar.", "Enxuto", true,
+            new[] { "Uma coluna", "Foco em texto", "Ideal para ATS" }),
+        new("compacto", "Compacto", "Máxima legibilidade para triagem automática. Uma coluna, títulos simples e sem firulas.", "ATS forte", true,
+            new[] { "Formato ATS-first", "Cabe mais conteúdo", "Próximo do padrão internacional" })
+    };
+
+    private static readonly string[] Palette = { "#1F6F5C", "#2F5D8A", "#B5502F", "#7A4B7E", "#3A3A33", "#A8762A" };
+
+    private readonly ResumeDocument _sample = PreviewData.TemplatePreview();
+    private AppUser? _user;
+    private List<ResumeEntity> _resumes = new();
+
+    private bool _useOpen, _busy;
+    private TemplateInfo? _template;
+    private string _newTitle = string.Empty;
+    private string _accent = "#1F6F5C";
+    private string _language = "pt";
+    private string _source = "blank";
+    private Guid? _baseResumeId;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _user = await Session.GetUserAsync();
+        if (_user is null) return;
+        _resumes = await Resumes.ListAsync(_user.Id);
+        _baseResumeId = _resumes.FirstOrDefault()?.Id;
+    }
+
+    private void OpenUse(TemplateInfo template)
+    {
+        _template = template;
+        _newTitle = $"Currículo · {template.Name}";
+        _accent = template.Id switch
+        {
+            "classico" => "#3A3A33",
+            "minimal" => "#2F5D8A",
+            "compacto" => "#1F6F5C",
+            _ => "#1F6F5C"
+        };
+        _language = "pt";
+        _source = _resumes.Count > 0 ? "resume" : "blank";
+        _busy = false;
+        _useOpen = true;
+    }
+
+    private async Task CreateFromTemplate()
+    {
+        if (_user is null || _template is null) return;
+        _busy = true;
+        try
+        {
+            ResumeDocument document;
+            if (_source == "resume" && _baseResumeId is { } baseId)
+            {
+                document = await Resumes.GetDocumentAsync(baseId, _user.Id) ?? new ResumeDocument();
+            }
+            else
+            {
+                document = new ResumeDocument { Contact = { FullName = _user.FullName } };
+            }
+
+            var title = string.IsNullOrWhiteSpace(_newTitle) ? $"Currículo · {_template.Name}" : _newTitle.Trim();
+            var entity = await Resumes.CreateAsync(_user.Id, document, title, _template.Id, _accent, _language);
+            _useOpen = false;
+            Toasts.Success($"Modelo {_template.Name} aplicado a um novo currículo.");
+            Nav.NavigateTo($"/resumes/{entity.Id}/edit");
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private static string PreviewAccent(string templateId) => templateId switch
+    {
+        "classico" => "#3A3A33",
+        "minimal" => "#2F5D8A",
+        "compacto" => "#1F6F5C",
+        _ => "#1F6F5C"
+    };
+}

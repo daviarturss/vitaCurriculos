@@ -1,0 +1,377 @@
+@inject UserSession Session
+@inject ChatStore Chats
+@inject AiAssistantService Ai
+@inject ToastService Toasts
+@inject IJSRuntime JS
+
+<div class="chat-panel @(Compact ? "is-compact" : "")">
+    <div class="chat-scroll" @ref="_scroll">
+        @if (_messages.Count == 0 && !_loading)
+        {
+            <div class="chat-empty">
+                <div class="orb"><Icon Name="sparkles" Size="22" /></div>
+                <h3>@(string.IsNullOrWhiteSpace(EmptyTitle) ? "Vamos ajustar seu currículo." : EmptyTitle)</h3>
+                <p>@(string.IsNullOrWhiteSpace(EmptyText) ? "Peça mudanças em linguagem natural. A Vita mostra o que vai alterar antes de aplicar no documento." : EmptyText)</p>
+                <div class="prompt-grid">
+                    @foreach (var prompt in QuickPrompts)
+                    {
+                        <button class="prompt-chip" @onclick="() => UsePrompt(prompt)">
+                            <Icon Name="wand" Size="13" />
+                            <span>@prompt</span>
+                        </button>
+                    }
+                </div>
+            </div>
+        }
+
+        @if (_loading)
+        {
+            <div class="page-loader" style="padding:30px"><span class="spinner"></span></div>
+        }
+
+        @foreach (var message in _messages)
+        {
+            <div class="msg @(message.Role == "user" ? "msg-user" : "msg-assistant")">
+                <div class="msg-avatar">
+                    @if (message.Role == "user")
+                    {
+                        @Initials
+                    }
+                    else
+                    {
+                        <Icon Name="sparkles" Size="14" />
+                    }
+                </div>
+                <div style="min-width:0">
+                    <div class="msg-bubble @(message.Error ? "msg-error" : "")">
+                        @if (message.Role == "assistant" && !string.IsNullOrWhiteSpace(message.Text))
+                        {
+                            @((MarkupString)SimpleMarkdown.ToHtml(message.Text))
+                        }
+                        else if (!string.IsNullOrWhiteSpace(message.Text))
+                        {
+                            <span style="white-space:pre-wrap">@message.Text</span>
+                        }
+                        else if (message.Streaming)
+                        {
+                            <span class="typing"><i></i><i></i><i></i></span>
+                        }
+                    </div>
+                    @if (message.Actions.Count > 0 && !message.Error)
+                    {
+                        <div class="msg-actions">
+                            <div class="action-head">
+                                <span><Icon Name="wand" Size="12" /> Mudanças propostas</span>
+                                @if (message.ActionsApplied)
+                                {
+                                    <span class="badge badge-soft">Aplicadas</span>
+                                }
+                            </div>
+                            @foreach (var action in message.Actions)
+                            {
+                                <div class="action-card">
+                                    <Icon Name="@ActionIcon(action)" Size="14" />
+                                    <div class="action-main">
+                                        <strong>@action.Label</strong>
+                                        @if (!string.IsNullOrWhiteSpace(action.Text))
+                                        {
+                                            <span>@TextAnalysis.Truncate(action.Text, 150)</span>
+                                        }
+                                    </div>
+                                </div>
+                            }
+                            @if (!message.ActionsApplied)
+                            {
+                                <button class="btn btn-accent btn-sm btn-block" @onclick="() => ApplyAsync(message)">
+                                    <Icon Name="check" Size="14" /> Aplicar no currículo
+                                </button>
+                            }
+                        </div>
+                    }
+                    @if (!message.Streaming && !message.Error)
+                    {
+                        <div class="msg-time">@message.Time.ToString("HH:mm")</div>
+                    }
+                </div>
+            </div>
+        }
+    </div>
+
+    <div class="chat-composer">
+        @if (_messages.Count > 0 && !_busy)
+        {
+            <div class="quick-prompts">
+                @foreach (var prompt in FollowUpPrompts)
+                {
+                    <button class="chip clickable" @onclick="() => UsePrompt(prompt)">@prompt</button>
+                }
+            </div>
+        }
+        <div class="chat-input-row">
+            <textarea @bind="_input" @bind:event="oninput" rows="1" placeholder="Ex.: deixe meu resumo mais direcionado para esta vaga…"
+                      @onkeydown="OnKeyDown" disabled="@_busy"></textarea>
+            <button class="send-btn" @onclick="SendAsync" disabled="@(_busy || string.IsNullOrWhiteSpace(_input))" title="Enviar">
+                @if (_busy)
+                {
+                    <span class="spinner spinner-sm"></span>
+                }
+                else
+                {
+                    <Icon Name="send" Size="18" />
+                }
+            </button>
+        </div>
+        <div class="chat-note">
+            <Icon Name="info" Size="12" />
+            A IA pode errar. Revise as mudanças antes de aplicar.
+            @if (Resume is null)
+            {
+                <span>· Nenhum currículo selecionado</span>
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter] public Guid? ThreadId { get; set; }
+    [Parameter] public ResumeDocument? Resume { get; set; }
+    [Parameter] public Guid? ResumeId { get; set; }
+    [Parameter] public string? JobDescription { get; set; }
+    [Parameter] public bool Compact { get; set; }
+    [Parameter] public string? EmptyTitle { get; set; }
+    [Parameter] public string? EmptyText { get; set; }
+    [Parameter] public string? DraftPrompt { get; set; }
+    [Parameter] public EventCallback<ResumeDocument> OnResumeChanged { get; set; }
+    [Parameter] public EventCallback<Guid> OnThreadCreated { get; set; }
+
+    private sealed class UiMessage
+    {
+        public string Role { get; set; } = "assistant";
+        public string Text { get; set; } = string.Empty;
+        public DateTime Time { get; set; } = DateTime.Now;
+        public List<AiAction> Actions { get; set; } = new();
+        public bool ActionsApplied { get; set; }
+        public bool Streaming { get; set; }
+        public bool Error { get; set; }
+        public string Raw { get; set; } = string.Empty;
+    }
+
+    private static readonly string[] QuickPrompts =
+    {
+        "Deixe meu resumo mais direcionado para esta vaga",
+        "Reescreva meus bullets com mais impacto",
+        "Quais palavras-chave estão faltando?",
+        "Adapte meu currículo para uma vaga sênior"
+    };
+
+    private static readonly string[] FollowUpPrompts =
+    {
+        "Deixe mais conciso",
+        "Adicione métricas onde fizer sentido",
+        "Ajuste o tom para mais profissional"
+    };
+
+    private readonly List<UiMessage> _messages = new();
+    private ElementReference _scroll;
+    private Guid? _loadedThreadId;
+    private bool _loading;
+    private bool _busy;
+    private string _input = string.Empty;
+    private AppUser? _user;
+
+    private string Initials => string.IsNullOrWhiteSpace(_user?.FullName)
+        ? "Eu"
+        : string.Concat(_user!.FullName.Split(' ', StringSplitOptions.RemoveEmptyEntries).Take(1).Select(p => p[..1].ToUpperInvariant()));
+
+    protected override async Task OnInitializedAsync()
+    {
+        _user = await Session.GetUserAsync();
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (!string.IsNullOrWhiteSpace(DraftPrompt) && string.IsNullOrWhiteSpace(_input) && !_busy)
+            _input = DraftPrompt;
+
+        if (ThreadId == _loadedThreadId) return;
+        _loadedThreadId = ThreadId;
+
+        if (ThreadId is not { } threadId)
+        {
+            _messages.Clear();
+            return;
+        }
+
+        _loading = true;
+        _messages.Clear();
+        var thread = await Chats.GetThreadAsync(threadId, await Session.RequireUserIdAsync());
+        if (thread is not null)
+        {
+            foreach (var entity in thread.Messages)
+            {
+                var (text, actions) = ChatActions.Parse(entity.Content);
+                _messages.Add(new UiMessage
+                {
+                    Role = entity.Role,
+                    Text = text,
+                    Raw = entity.Content,
+                    Time = entity.CreatedAt.ToLocalTime(),
+                    Actions = actions,
+                    ActionsApplied = entity.Role == "assistant" && actions.Count > 0 && entity.Id != Guid.Empty && _appliedMessageIds.Contains(entity.Id)
+                });
+            }
+        }
+        _loading = false;
+    }
+
+    private static readonly HashSet<Guid> _appliedMessageIds = new();
+
+    private void UsePrompt(string prompt)
+    {
+        _input = prompt;
+    }
+
+    private async Task OnKeyDown(KeyboardEventArgs args)
+    {
+        if (args.Key == "Enter" && !args.ShiftKey)
+        {
+            await SendAsync();
+        }
+    }
+
+    private async Task SendAsync()
+    {
+        if (_busy) return;
+        var text = _input.Trim();
+        if (text.Length == 0) return;
+        if (_user is null) _user = await Session.GetUserAsync();
+        if (_user is null) return;
+
+        _input = string.Empty;
+        _busy = true;
+
+        var userId = _user.Id;
+        Guid threadId;
+        if (_loadedThreadId is { } existing && existing != Guid.Empty)
+        {
+            threadId = existing;
+        }
+        else
+        {
+            var title = text.Length > 64 ? text[..64] : text;
+            var thread = await Chats.CreateThreadAsync(userId, ResumeId, title);
+            threadId = thread.Id;
+            _loadedThreadId = threadId;
+            await OnThreadCreated.InvokeAsync(threadId);
+        }
+
+        var userMessage = new UiMessage { Role = "user", Text = text, Time = DateTime.Now, Raw = text };
+        _messages.Add(userMessage);
+        await Chats.AddMessageAsync(threadId, "user", text);
+
+        var history = _messages
+            .Where(m => !m.Error && !m.Streaming)
+            .Select(m => new AiMessage(m.Role, string.IsNullOrWhiteSpace(m.Text) ? m.Raw : m.Text))
+            .ToList();
+
+        var assistant = new UiMessage { Role = "assistant", Streaming = true, Time = DateTime.Now };
+        _messages.Add(assistant);
+        await ScrollAsync();
+
+        try
+        {
+            var buffer = new System.Text.StringBuilder();
+            await foreach (var chunk in Ai.ChatStreamAsync(userId, Resume, JobDescription, history))
+            {
+                buffer.Append(chunk);
+                assistant.Text = buffer.ToString();
+                await InvokeAsync(StateHasChanged);
+                await ScrollAsync();
+            }
+
+            var raw = buffer.ToString();
+            assistant.Raw = raw;
+            var (display, actions) = ChatActions.Parse(raw);
+            assistant.Text = string.IsNullOrWhiteSpace(display) ? "Fiz os ajustes no seu currículo." : display;
+            assistant.Actions = actions;
+            assistant.Streaming = false;
+            await Chats.AddMessageAsync(threadId, "assistant", raw);
+        }
+        catch (AiException ex)
+        {
+            assistant.Streaming = false;
+            var local = await TryLocalReplyAsync(threadId, assistant, text, ex.Message);
+            if (!local)
+            {
+                assistant.Error = true;
+                assistant.Text = ex.Message;
+                Toasts.Error("A IA não respondeu. Veja os detalhes na conversa.");
+            }
+        }
+        catch (Exception)
+        {
+            assistant.Streaming = false;
+            assistant.Error = true;
+            assistant.Text = "Não foi possível concluir a resposta. Verifique a conexão com o provedor de IA em Configurações e tente novamente.";
+        }
+        finally
+        {
+            _busy = false;
+            await ScrollAsync();
+        }
+    }
+
+    private async Task<bool> TryLocalReplyAsync(Guid threadId, UiMessage assistant, string prompt, string providerError)
+    {
+        if (Resume is null) return false;
+        var local = LocalAssistant.Suggest(Resume, prompt, JobDescription);
+        if (local.Actions.Count == 0 && string.IsNullOrWhiteSpace(local.Text)) return false;
+
+        assistant.Streaming = false;
+        assistant.Error = false;
+        assistant.Text = $"*{providerError}*\n\n{local.Text}";
+        assistant.Actions = local.Actions;
+        assistant.Raw = local.Actions.Count == 0
+            ? local.Text
+            : local.Text + "\n" + ChatActions.OpenTag + Json.Serialize(local.Actions) + ChatActions.CloseTag;
+        await Chats.AddMessageAsync(threadId, "assistant", assistant.Raw);
+        Toasts.Info("Provedor de IA indisponível. Gerei uma proposta local para você revisar.");
+        return true;
+    }
+
+    private async Task ApplyAsync(UiMessage message)
+    {
+        if (message.Actions.Count == 0) return;
+        var document = Resume?.Clone() ?? new ResumeDocument();
+        var applied = ChatActions.Apply(document, message.Actions);
+        if (applied == 0)
+        {
+            Toasts.Info("Nenhuma mudança pôde ser aplicada. O currículo pode ter sido alterado.");
+            return;
+        }
+        message.ActionsApplied = true;
+        await OnResumeChanged.InvokeAsync(document);
+        Toasts.Success($"{applied} {(applied == 1 ? "mudança aplicada" : "mudanças aplicadas")} no currículo.");
+    }
+
+    private async Task ScrollAsync()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("vita.scrollToEnd", _scroll);
+        }
+        catch
+        {
+            // pre-render / disconnected circuit
+        }
+    }
+
+    private static string ActionIcon(AiAction action) => action.Type switch
+    {
+        "summary" => "file",
+        "headline" => "user",
+        "update_bullet" or "add_bullet" => "pencil",
+        "add_skill" or "remove_skill" => "sparkles",
+        _ => "wand"
+    };
+}

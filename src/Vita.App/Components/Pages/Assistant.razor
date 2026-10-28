@@ -1,0 +1,234 @@
+@page "/assistant"
+@attribute [Authorize]
+@inject UserSession Session
+@inject ResumeStore ResumeStore
+@inject ChatStore Chats
+@inject ToastService Toasts
+@inject NavigationManager Nav
+
+<PageTitle>Assistente IA · Vita</PageTitle>
+
+<div class="page-head">
+    <div class="page-head-main">
+        <span class="eyebrow"><span class="dot"></span> Converse, revise, aplique</span>
+        <h1 class="page-title">Sua <em>assistente</em> de carreira</h1>
+        <p class="page-sub">Peça ajustes no currículo em linguagem natural. A Vita mostra cada mudança proposta e só altera o documento quando você aprova.</p>
+    </div>
+    <div class="page-actions">
+        <button class="btn btn-ghost" @onclick="OpenJobModal">
+            <Icon Name="target" Size="16" /> Vaga alvo
+        </button>
+        <button class="btn btn-primary" @onclick="NewThread">
+            <Icon Name="plus" Size="16" /> Nova conversa
+        </button>
+    </div>
+</div>
+
+@if (_loading)
+{
+    <div class="page-loader"><span class="spinner"></span></div>
+}
+else
+{
+    <div class="chat-shell">
+        <aside class="chat-threads">
+            <div class="chat-threads-head">
+                <strong style="font-size:12px">Conversas</strong>
+                <span class="tiny muted">@(_threads.Count == 1 ? "1 conversa" : $"{_threads.Count} conversas")</span>
+            </div>
+            <div class="thread-list">
+                @if (_threads.Count == 0)
+                {
+                    <div class="thread-empty">Nenhuma conversa ainda.<br />Comece pela sugestão ao lado.</div>
+                }
+                @foreach (var thread in _threads)
+                {
+                    <div class="thread-wrap">
+                        <button class="thread-btn @(_selectedThreadId == thread.Id ? "active" : "")" @onclick="() => SelectThread(thread)">
+                            <strong>@thread.Title</strong>
+                            <span>@Human(thread.UpdatedAt)</span>
+                        </button>
+                        <button class="icon-btn thread-delete" title="Excluir conversa" @onclick="() => DeleteThread(thread)">
+                            <Icon Name="trash" Size="14" />
+                        </button>
+                    </div>
+                }
+            </div>
+        </aside>
+
+        <div class="chat-main">
+            <div class="chat-header">
+                <span class="avatar avatar-sm" style="background:var(--accent-soft);color:var(--accent-ink)"><Icon Name="sparkles" Size="15" /></span>
+                <div style="min-width:0;flex:1">
+                    <strong style="font-size:12.5px;display:block">Assistente Vita</strong>
+                    <span class="tiny muted">@(_jobDescription is { Length: > 0 } ? "Com vaga alvo carregada" : "Contexto do currículo selecionado")</span>
+                </div>
+                <select class="select" @bind="_resumeId" @bind:after="OnResumeChanged">
+                    <option value="">Sem currículo</option>
+                    @foreach (var resume in _resumes)
+                    {
+                        <option value="@resume.Id">@resume.Title</option>
+                    }
+                </select>
+                @if (_jobDescription is { Length: > 0 })
+                {
+                    <span class="badge badge-soft" title="@TextAnalysis.Truncate(_jobDescription, 200)">Vaga alvo</span>
+                }
+            </div>
+
+            <ChatPanel ThreadId="_selectedThreadId"
+                       Resume="_document"
+                       ResumeId="_resumeGuid"
+                       JobDescription="_jobDescription"
+                       OnThreadCreated="ThreadCreated"
+                       OnResumeChanged="ResumeChanged" />
+        </div>
+    </div>
+}
+
+<Modal Open="_jobOpen" Title="Vaga alvo" Subtitle="Cole a descrição da vaga. A assistente usa esse contexto para alinhar palavras-chave, resumo e bullets." OnClose="() => _jobOpen = false" Size="lg">
+    <ChildContent>
+        <div class="field">
+            <span>Descrição da vaga</span>
+            <textarea class="textarea" rows="10" @bind="_jobDraft" placeholder="Cole aqui a descrição completa da vaga…"></textarea>
+        </div>
+        <div class="row-wrap">
+            @if (_jobDescription is { Length: > 0 })
+            {
+                <button class="btn btn-danger-ghost btn-sm" @onclick="ClearJob"><Icon Name="x" Size="14" /> Remover vaga</button>
+            }
+        </div>
+    </ChildContent>
+    <Footer>
+        <button class="btn btn-ghost" @onclick="() => _jobOpen = false">Cancelar</button>
+        <button class="btn btn-primary" @onclick="SaveJob">Usar esta vaga</button>
+    </Footer>
+</Modal>
+
+@code {
+    private List<ChatThread> _threads = new();
+    private List<ResumeEntity> _resumes = new();
+    private ResumeDocument? _document;
+    private Guid? _selectedThreadId;
+    private Guid? _resumeId;
+    private string? _jobDescription;
+    private bool _loading = true;
+    private bool _jobOpen;
+    private string _jobDraft = string.Empty;
+    private AppUser? _user;
+
+    private Guid? _resumeGuid => _resumeId;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _user = await Session.GetUserAsync();
+        if (_user is null) return;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _threads = await Chats.ThreadsAsync(_user!.Id);
+        _resumes = await ResumeStore.ListAsync(_user.Id);
+        var preferred = _resumes.FirstOrDefault(r => r.IsDefault) ?? _resumes.FirstOrDefault();
+        _resumeId = preferred?.Id;
+        _document = preferred is null ? null : Json.Deserialize<ResumeDocument>(preferred.DataJson);
+        if (_threads.Count > 0) await SelectThreadCore(_threads[0]);
+        _loading = false;
+    }
+
+    private async Task SelectThread(ChatThread thread) => await SelectThreadCore(thread);
+
+    private async Task SelectThreadCore(ChatThread thread)
+    {
+        _selectedThreadId = thread.Id;
+        if (thread.ResumeId is { } resumeId && _resumes.Any(r => r.Id == resumeId))
+        {
+            _resumeId = resumeId;
+            var entity = _resumes.First(r => r.Id == resumeId);
+            _document = Json.Deserialize<ResumeDocument>(entity.DataJson);
+        }
+    }
+
+    private void NewThread()
+    {
+        _selectedThreadId = null;
+        _jobDescription = null;
+    }
+
+    private async Task ThreadCreated(Guid threadId)
+    {
+        _selectedThreadId = threadId;
+        _threads = await Chats.ThreadsAsync(_user!.Id);
+    }
+
+    private async Task DeleteThread(ChatThread thread)
+    {
+        if (_user is null) return;
+        await Chats.DeleteThreadAsync(thread.Id, _user.Id);
+        if (_selectedThreadId == thread.Id) _selectedThreadId = null;
+        _threads = await Chats.ThreadsAsync(_user.Id);
+        Toasts.Success("Conversa excluída.");
+    }
+
+    private void OnResumeChanged()
+    {
+        var entity = _resumes.FirstOrDefault(r => r.Id == _resumeId);
+        _document = entity is null ? null : Json.Deserialize<ResumeDocument>(entity.DataJson);
+    }
+
+    private async Task ResumeChanged(ResumeDocument document)
+    {
+        if (_user is null) return;
+        _document = document;
+        if (_resumeId is { } id)
+        {
+            await ResumeStore.SaveAsync(id, _user.Id, document);
+            var index = _resumes.FindIndex(r => r.Id == id);
+            if (index >= 0)
+            {
+                _resumes[index].DataJson = Json.Serialize(document);
+                _resumes[index].UpdatedAt = DateTime.UtcNow;
+            }
+        }
+        else
+        {
+            var entity = await ResumeStore.CreateAsync(_user.Id, document, "Currículo ajustado pela IA");
+            _resumeId = entity.Id;
+            _resumes = await ResumeStore.ListAsync(_user.Id);
+        }
+    }
+
+    private void OpenJobModal()
+    {
+        _jobDraft = _jobDescription ?? string.Empty;
+        _jobOpen = true;
+    }
+
+    private void SaveJob()
+    {
+        _jobDescription = string.IsNullOrWhiteSpace(_jobDraft) ? null : _jobDraft.Trim();
+        _jobOpen = false;
+        Toasts.Success(_jobDescription is null ? "Vaga removida do contexto." : "Vaga alvo carregada nesta conversa.");
+    }
+
+    private void ClearJob()
+    {
+        _jobDraft = string.Empty;
+        _jobDescription = null;
+        _jobOpen = false;
+    }
+
+    private static string Human(DateTime value)
+    {
+        var days = (DateTime.UtcNow - value).TotalDays;
+        return days switch
+        {
+            < 1 => "hoje",
+            < 2 => "ontem",
+            < 30 => $"há {(int)days} dias",
+            _ => value.ToString("d MMM", new CultureInfo("pt-BR"))
+        };
+    }
+}

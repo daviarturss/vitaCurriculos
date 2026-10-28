@@ -1,0 +1,53 @@
+VITA — currículo, ATS e vagas com IA
+===================================
+
+COMO ABRIR
+1. Extraia esta pasta para um lugar só seu, como Documentos ou Área de Trabalho.
+   Evite pastas protegidas como Arquivos de Programas.
+2. Dê dois cliques em Vita.exe.
+3. O navegador abre sozinho em http://localhost:5180.
+
+ENTRAR COM SEU NOME
+Na primeira vez, digite seu nome para criar um perfil local. Não há e-mail nem
+senha. Da próxima vez, escolha o nome na lista ou digite-o novamente.
+
+Cada nome tem uma pasta separada com seus currículos, candidaturas, cartas e
+conversas. Para outra pessoa usar o mesmo computador, entre com outro nome: ela
+começa com um espaço vazio.
+
+SEUS DADOS
+Tudo fica na pasta App_Data, ao lado do Vita.exe:
+  App_Data\perfis\<nome>\vita.db   (dados daquele perfil)
+  App_Data\keys                    (chaves de proteção)
+
+Nada é enviado para servidores da Vita. Para fazer backup, copie a pasta
+App_Data. Em Configurações > Conta você vê a pasta do seu perfil e pode abri-la
+no Explorer.
+
+INTELIGÊNCIA ARTIFICIAL (opcional)
+A Vita funciona sem IA: análise ATS, modelos de currículo, cartas e sugestões
+locais continuam disponíveis. A IA começa desativada e você ativa quando quiser:
+- Abra Configurações > Inteligência artificial.
+- Ollama local: a Vita verifica a instalação, pode instalar, iniciar o serviço e
+  baixar o modelo recomendado (llama3.1, cerca de 5 GB).
+- Ollama Cloud: informe sua própria chave e tenha créditos na conta.
+- Também aceita qualquer API compatível com OpenAI (OpenAI, Groq, OpenRouter).
+
+Este pacote NÃO inclui chave de API. A chave que você informar fica criptografada
+neste computador.
+
+AVISO DO WINDOWS (SmartScreen)
+O executável não tem assinatura digital paga. Se aparecer "O Windows protegeu o
+seu PC", clique em "Mais informações" e depois em "Executar assim mesmo".
+
+PROBLEMAS COMUNS
+- O navegador não abriu? Acesse http://localhost:5180 manualmente.
+- A porta 5180 está ocupada? A Vita usa automaticamente a próxima livre
+  (5181, 5182...) e abre o navegador no endereço certo.
+- Nada abriu? Veja o arquivo App_Data\vita-error.log.
+- Para encerrar, use Configurações > Sobre a Vita > "Encerrar Vita".
+  Fechar apenas a aba do navegador não encerra o aplicativo.
+- Para remover o app portátil, feche a Vita e apague esta pasta.
+
+REQUISITOS
+Windows 10 ou 11, 64 bits. Não é preciso instalar o .NET.

@@ -1,0 +1,890 @@
+@page "/settings"
+@attribute [Authorize]
+@inject UserSession Session
+@inject AiSettingsService AiSettings
+@inject AiClient AiClient
+@inject OllamaSetupService Ollama
+@inject ProfileManager Profiles
+@inject Microsoft.AspNetCore.Components.Authorization.AuthenticationStateProvider AuthState
+@inject ToastService Toasts
+@inject IJSRuntime JS
+@inject IHostApplicationLifetime Lifetime
+
+<PageTitle>Configurações · Vita</PageTitle>
+
+<div class="page-head">
+    <div class="page-head-main">
+        <span class="eyebrow"><span class="dot"></span> Seu espaço, suas regras</span>
+        <h1 class="page-title">Configurações da <em>Vita</em></h1>
+        <p class="page-sub">Conecte o provedor de IA, escolha o modelo e controle seus dados. Tudo é armazenado localmente no seu computador.</p>
+    </div>
+</div>
+
+@if (_loading)
+{
+    <div class="page-loader"><span class="spinner"></span></div>
+}
+else
+{
+    <div class="settings-grid">
+        <div class="stack">
+            <section class="card settings-section">
+                <div class="row-between">
+                    <div>
+                        <h3>Inteligência artificial</h3>
+                        <p class="desc">Opcional. A Vita funciona sem IA: currículos, ATS, vagas e cartas usam recursos locais. Ative quando quiser.</p>
+                    </div>
+                    <span class="status-line">
+                        <span class="status-dot @(AiReady ? "" : "off")"></span>
+                        @ProviderStatus
+                    </span>
+                </div>
+
+                <div class="provider-options">
+                    <button type="button" class="provider-option @(_provider == "none" ? "active" : "")" @onclick='() => SetProvider("none")'>
+                        <span class="provider-orb"><Icon Name="x" Size="16" /></span>
+                        <span>
+                            <strong>Sem IA</strong>
+                            <em>Conheça o app sem configurar nada</em>
+                        </span>
+                    </button>
+                    <button type="button" class="provider-option @(_provider == "ollama-local" ? "active" : "")" @onclick='() => SetProvider("ollama-local")'>
+                        <span class="provider-orb"><Icon Name="brain" Size="16" /></span>
+                        <span>
+                            <strong>Ollama local</strong>
+                            <em>Grátis, roda na sua máquina</em>
+                        </span>
+                    </button>
+                    <button type="button" class="provider-option @(_provider == "ollama-cloud" ? "active" : "")" @onclick='() => SetProvider("ollama-cloud")'>
+                        <span class="provider-orb"><Icon Name="sparkles" Size="16" /></span>
+                        <span>
+                            <strong>Ollama Cloud</strong>
+                            <em>Hospedado, precisa de chave e créditos</em>
+                        </span>
+                    </button>
+                    <button type="button" class="provider-option @(_provider == "openai-compatible" ? "active" : "")" @onclick='() => SetProvider("openai-compatible")'>
+                        <span class="provider-orb"><Icon Name="globe" Size="16" /></span>
+                        <span>
+                            <strong>Compatível com OpenAI</strong>
+                            <em>OpenAI, Groq, OpenRouter e outros</em>
+                        </span>
+                    </button>
+                </div>
+
+                @if (_provider == "none")
+                {
+                    <div class="alert alert-neutral">
+                        <Icon Name="info" Size="16" />
+                        <div class="alert-stack">
+                            <strong>IA desativada — e está tudo bem.</strong>
+                            <span>Você pode usar o app inteiro sem configurar nada. Quando quiser, ative o Ollama local (sem custo) ou conecte um provedor com chave.</span>
+                        </div>
+                    </div>
+                    <div class="row-wrap">
+                        <button class="btn btn-primary btn-sm" @onclick='() => SetProvider("ollama-local")'><Icon Name="brain" Size="14" /> Configurar Ollama local</button>
+                        <button class="btn btn-ghost btn-sm" @onclick='() => SetProvider("openai-compatible")'><Icon Name="globe" Size="14" /> Usar provedor com chave</button>
+                    </div>
+                }
+                else
+                {
+                    @if (_provider == "ollama-local")
+                    {
+                        <div class="ai-setup">
+                            <div class="ai-setup-head">
+                                <div>
+                                    <strong>Ollama nesta máquina</strong>
+                                    <span>@_requirements.Summary</span>
+                                </div>
+                                <span class="badge @(LocalReady ? "badge-soft" : "badge-outline")">@(LocalReady ? "Pronto" : "Configuração pendente")</span>
+                            </div>
+
+                            <div class="setup-steps">
+                                <div class="setup-step @(_probe?.Installed == true ? "ok" : "")">
+                                    <span class="setup-check">@if (_probe?.Installed == true) { <Icon Name="check" Size="12" /> } else { <span>1</span> }</span>
+                                    <div>
+                                        <strong>Ollama instalado</strong>
+                                        <span>@(_probe?.Installed == true ? "Encontrado nesta máquina." : "Ainda não encontrado. A instalação é feita uma única vez.")</span>
+                                    </div>
+                                </div>
+                                <div class="setup-step @(_probe?.Running == true ? "ok" : "")">
+                                    <span class="setup-check">@if (_probe?.Running == true) { <Icon Name="check" Size="12" /> } else { <span>2</span> }</span>
+                                    <div>
+                                        <strong>Serviço rodando</strong>
+                                        <span>@(_probe?.Running == true ? $"Respondendo em {_baseUrl}." : "Parado. O app pode iniciar o serviço por você.")</span>
+                                    </div>
+                                </div>
+                                <div class="setup-step @(LocalModelReady ? "ok" : "")">
+                                    <span class="setup-check">@if (LocalModelReady) { <Icon Name="check" Size="12" /> } else { <span>3</span> }</span>
+                                    <div>
+                                        <strong>Modelo @_model</strong>
+                                        <span>@(LocalModelReady ? "Baixado e pronto para usar." : "Ainda não baixado. O download pode levar alguns minutos.")</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="row-wrap">
+                                @if (_probe?.Installed != true)
+                                {
+                                    <button class="btn btn-primary btn-sm" @onclick="InstallOllamaAsync" disabled="@_setupBusy">
+                                        @if (_setupBusy) { <span class="spinner spinner-sm"></span> } else { <Icon Name="download" Size="14" /> }
+                                        Instalar Ollama
+                                    </button>
+                                    <button class="btn btn-ghost btn-sm" @onclick="OpenOllamaDownload">
+                                        <Icon Name="globe" Size="14" /> Abrir site oficial
+                                    </button>
+                                }
+                                else if (_probe?.Running != true)
+                                {
+                                    <button class="btn btn-primary btn-sm" @onclick="StartOllamaAsync" disabled="@_setupBusy">
+                                        @if (_setupBusy) { <span class="spinner spinner-sm"></span> } else { <Icon Name="arrow-right" Size="14" /> }
+                                        Iniciar Ollama
+                                    </button>
+                                }
+                                @if (_probe?.Running == true && !LocalModelReady)
+                                {
+                                    <button class="btn btn-primary btn-sm" @onclick="DownloadModelAsync" disabled="@_setupBusy">
+                                        @if (_setupBusy) { <span class="spinner spinner-sm"></span> } else { <Icon Name="download" Size="14" /> }
+                                        Baixar modelo @_model
+                                    </button>
+                                }
+                                <button class="btn btn-ghost btn-sm" @onclick="RefreshProbeAsync" disabled="@_setupBusy">
+                                    <Icon Name="refresh" Size="14" /> Verificar novamente
+                                </button>
+                                <button class="btn btn-ghost btn-sm" @onclick="UseRecommendedModel" disabled="@_setupBusy">
+                                    <Icon Name="wand" Size="14" /> Usar recomendado (@_requirements.RecommendedModel)
+                                </button>
+                            </div>
+
+                            @if (_setupBusy)
+                            {
+                                <div class="setup-log">
+                                    <span class="spinner spinner-sm spinner-dark"></span>
+                                    <span>@(_setupLog ?? "Trabalhando…")</span>
+                                </div>
+                            }
+                            @if (!string.IsNullOrWhiteSpace(_setupMessage))
+                            {
+                                <div class="field-hint">@_setupMessage</div>
+                            }
+                        </div>
+                    }
+
+                    @if (_provider == "openai-compatible")
+                    {
+                        <div class="row-wrap">
+                            <span class="field-hint">Preenchimento rápido:</span>
+                            @foreach (var preset in AiProviderCatalog.OpenAiCompatiblePresets)
+                            {
+                                <button type="button" class="chip clickable" @onclick='() => ApplyPreset(preset)'>@preset.Name</button>
+                            }
+                        </div>
+                    }
+
+                    <div class="form-grid">
+                        <label class="field span-2">
+                            <span>URL base</span>
+                            <input @bind="_baseUrl" placeholder="@BaseUrlPlaceholder" />
+                            <span class="field-hint">@BaseUrlHint</span>
+                        </label>
+                        <label class="field">
+                            <span>Modelo</span>
+                            <div class="api-key-row">
+                                <input @bind="_model" list="model-suggestions" placeholder="Nome do modelo" />
+                                <button type="button" class="icon-btn" title="Buscar modelos disponíveis" @onclick="LoadModelsAsync" disabled="@_loadingModels">
+                                    @if (_loadingModels) { <span class="spinner spinner-sm spinner-dark"></span> } else { <Icon Name="search" Size="16" /> }
+                                </button>
+                            </div>
+                            <datalist id="model-suggestions">
+                                @foreach (var model in ModelSuggestions)
+                                {
+                                    <option value="@model"></option>
+                                }
+                            </datalist>
+                            <span class="field-hint">@ModelHint</span>
+                        </label>
+                        <div class="field">
+                            <span>Temperatura</span>
+                            <div class="range-row">
+                                <input type="range" min="0" max="1" step="0.05" @bind="_temperature" />
+                                <b>@_temperature.ToString("0.00")</b>
+                            </div>
+                            <span class="field-hint">Menor = mais previsível. Maior = mais criativo.</span>
+                        </div>
+                        @if (_provider != "ollama-local")
+                        {
+                            <label class="field span-2">
+                                <span>Chave de API</span>
+                                <div class="api-key-row">
+                                    <input class="input" type="@(_showKey ? "text" : "password")" @bind="_apiKey"
+                                           placeholder="@(_hasKey ? "••••••••••••••••  (salva — deixe em branco para manter)" : "Cole a chave do provedor")" />
+                                    <button type="button" class="icon-btn" title="@(_showKey ? "Ocultar" : "Mostrar")" @onclick="() => _showKey = !_showKey">
+                                        <Icon Name="eye" Size="16" />
+                                    </button>
+                                </div>
+                                <span class="field-hint">A chave é criptografada com Data Protection antes de ir para o banco local.</span>
+                                @if (!string.IsNullOrWhiteSpace(KeyHelpUrl))
+                                {
+                                    <a class="field-hint" href="@KeyHelpUrl" target="_blank" rel="noopener">@KeyHelpLabel</a>
+                                }
+                            </label>
+                        }
+                    </div>
+
+                    <label class="checkbox-row">
+                        <input type="checkbox" @bind="_jsonMode" />
+                        <span>Pedir respostas em JSON quando o recurso for estruturado (recomendado)</span>
+                    </label>
+                }
+
+                @if (!string.IsNullOrWhiteSpace(_testOk))
+                {
+                    <div class="alert alert-info"><Icon Name="check" Size="16" /><span>@_testOk</span></div>
+                }
+                @if (!string.IsNullOrWhiteSpace(_testError))
+                {
+                    <div class="alert alert-error">
+                        <Icon Name="alert" Size="16" />
+                        <div class="alert-stack">
+                            <strong>@_testError</strong>
+                            @if (!string.IsNullOrWhiteSpace(_testHint)) { <span>@_testHint</span> }
+                            @if (!string.IsNullOrWhiteSpace(_testHelpUrl))
+                            {
+                                <a href="@_testHelpUrl" target="_blank" rel="noopener">@(_testHelpLabel ?? "Abrir ajuda")</a>
+                            }
+                        </div>
+                    </div>
+                }
+
+                <div class="row-wrap">
+                    <button class="btn btn-primary btn-sm" @onclick="SaveAsync" disabled="@_saving">
+                        @if (_saving) { <span class="spinner spinner-sm"></span> } else { <Icon Name="save" Size="14" /> }
+                        Salvar configurações
+                    </button>
+                    @if (_provider != "none")
+                    {
+                        <button class="btn btn-ghost btn-sm" @onclick="TestAsync" disabled="@(_testing || _saving)">
+                            @if (_testing) { <span class="spinner spinner-sm spinner-dark"></span> } else { <Icon Name="send" Size="14" /> }
+                            Testar conexão
+                        </button>
+                    }
+                    @if (_hasKey && _provider is not (AiProviderCatalog.OllamaLocal or AiProviderCatalog.None))
+                    {
+                        <button class="btn btn-danger-ghost btn-sm" @onclick="ClearKey">
+                            <Icon Name="trash" Size="14" /> Remover chave
+                        </button>
+                    }
+                </div>
+            </section>
+
+            <section class="card settings-section">
+                <h3>Dados e privacidade</h3>
+                <p class="desc">Currículos, candidaturas e cartas ficam em uma pasta e um banco SQLite por perfil, dentro do app. Nada é sincronizado com servidores nossos.</p>
+                <div class="settings-row">
+                    <div>
+                        <strong>Exportar todos os dados</strong>
+                        <span>Baixe um JSON com currículos, candidaturas, cartas e vagas salvas.</span>
+                    </div>
+                    <a class="btn btn-ghost btn-sm" href="/api/export"><Icon Name="download" Size="14" /> Exportar</a>
+                </div>
+                <div class="settings-row">
+                    <div>
+                        <strong>Provedor de IA</strong>
+                        <span>Ao usar IA, o currículo e o texto da vaga são enviados ao provedor escolhido.</span>
+                    </div>
+                    <span class="badge badge-outline">@(_provider switch { AiProviderCatalog.OllamaLocal => "Local", AiProviderCatalog.None => "Desligada", _ => "Externo" })</span>
+                </div>
+                <div class="settings-row">
+                    <div>
+                        <strong>Armazenamento</strong>
+                        <span><code class="inline-code">@(_profile?.Directory ?? "App_Data/perfis")</code> · chaves em <code class="inline-code">App_Data/keys</code></span>
+                    </div>
+                    <span class="badge badge-soft">Local</span>
+                </div>
+                <div class="alert alert-neutral">
+                    <Icon Name="info" Size="16" />
+                    <span>Sem créditos no provedor, o app mostra um erro claro e mantém a análise local funcionando. Nenhum recurso essencial depende da nuvem.</span>
+                </div>
+            </section>
+        </div>
+
+        <div class="stack">
+            <section class="card settings-section">
+                <h3>Conta</h3>
+                @if (_user is not null)
+                {
+                    <div class="account-card">
+                        <span class="avatar avatar-lg">@Initials(_user.FullName)</span>
+                        <div>
+                            <strong>@_user.FullName</strong>
+                            <span>@(_profile is { } profile ? $"Perfil local · {profile.Slug}" : "Perfil local")</span>
+                            <span class="badge badge-soft" style="margin-top:6px">Conta local</span>
+                        </div>
+                    </div>
+                    <div class="settings-row">
+                        <div><strong>Idioma preferido</strong><span>@LanguageName(_user.PreferredLanguage)</span></div>
+                    </div>
+                    <div class="settings-row">
+                        <div><strong>Conta criada em</strong><span>@_user.CreatedAt.ToLocalTime().ToString("d 'de' MMMM 'de' yyyy", new CultureInfo("pt-BR"))</span></div>
+                    </div>
+                    @if (Profiles.Current is { } current)
+                    {
+                        <div class="settings-row">
+                            <div>
+                                <strong>Pasta deste perfil</strong>
+                                <span class="profile-path" title="@current.Directory">@current.Directory</span>
+                            </div>
+                        </div>
+                        <button class="btn btn-ghost btn-sm btn-block" @onclick="OpenProfileFolder">
+                            <Icon Name="folder" Size="14" /> Abrir pasta do perfil
+                        </button>
+                    }
+                    <button class="btn btn-ghost btn-sm btn-block" @onclick="Logout">
+                        <Icon Name="logout" Size="14" /> Sair e trocar de perfil
+                    </button>
+                }
+            </section>
+
+            <section class="card settings-section">
+                <h3>Como a IA é usada</h3>
+                <div class="settings-row">
+                    <div><strong>Assistente e edições</strong><span>Chat com aprovação antes de alterar o currículo.</span></div>
+                    <Icon Name="check" Size="15" />
+                </div>
+                <div class="settings-row">
+                    <div><strong>Análise ATS</strong><span>Funciona 100% local, sem IA.</span></div>
+                    <Icon Name="check" Size="15" />
+                </div>
+                <div class="settings-row">
+                    <div><strong>Tailoring</strong><span>Versão local determinística + opção com IA.</span></div>
+                    <Icon Name="check" Size="15" />
+                </div>
+                <div class="settings-row">
+                    <div><strong>Cartas</strong><span>Modelo local por idioma e tom + geração com IA.</span></div>
+                    <Icon Name="check" Size="15" />
+                </div>
+                <div class="alert alert-neutral">
+                    <Icon Name="alert" Size="16" />
+                    <span>Revise sempre fatos, números e nomes sugeridos pela IA. A Vita instrui o modelo a não inventar experiências, mas a revisão final é sua.</span>
+                </div>
+            </section>
+
+            <section class="card settings-section">
+                <h3>Sobre a Vita</h3>
+                <p class="desc">Um app local para currículo, análise ATS, vagas, candidaturas e cartas. Feito para Windows, com seus dados sob seu controle.</p>
+                <div class="settings-row">
+                    <div><strong>Versão</strong><span>1.0 · .NET 10 · Blazor Server</span></div>
+                </div>
+                <div class="settings-row">
+                    <div><strong>Atalho de exportação</strong><span>PDF e DOCX direto do editor.</span></div>
+                </div>
+                <div class="settings-row">
+                    <div><strong>Aplicativo</strong><span>Feche a Vita quando terminar. Seus dados continuam salvos.</span></div>
+                    @if (_shuttingDown)
+                    {
+                        <span class="badge badge-outline">Encerrando…</span>
+                    }
+                    else
+                    {
+                        <button class="btn btn-ghost btn-sm" @onclick="ShutdownAsync">Encerrar Vita</button>
+                    }
+                </div>
+                @if (_shuttingDown)
+                {
+                    <div class="alert alert-neutral">
+                        <Icon Name="check" Size="16" />
+                        <span>Vita encerrada. Você já pode fechar esta aba e abrir o app novamente pelo atalho quando quiser.</span>
+                    </div>
+                }
+            </section>
+        </div>
+    </div>
+}
+
+@code {
+    private AppUser? _user;
+    private bool _loading = true;
+    private bool _saving;
+    private bool _testing;
+    private bool _hasKey;
+    private bool _showKey;
+    private bool _jsonMode = true;
+    private bool _shuttingDown;
+    private bool _setupBusy;
+    private bool _loadingModels;
+
+    private string _provider = AiProviderCatalog.None;
+    private string _baseUrl = string.Empty;
+    private string _model = string.Empty;
+    private string _apiKey = string.Empty;
+    private double _temperature = 0.4;
+    private string? _testOk;
+    private string? _testError;
+    private string? _testHint;
+    private string? _testHelpUrl;
+    private string? _testHelpLabel;
+    private string? _setupLog;
+    private string? _setupMessage;
+    private OllamaProbe? _probe;
+    private AiRequirements _requirements = new(0, 0, "llama3.1", "Llama 3.1 8B", 4.9, string.Empty);
+    private List<string> _availableModels = new();
+
+    private bool LocalModelReady => _probe?.Running == true && _probe.HasModel(_model);
+    private bool LocalReady => _probe?.Running == true && LocalModelReady;
+    private bool AiReady => _provider switch
+    {
+        AiProviderCatalog.None => false,
+        AiProviderCatalog.OllamaLocal => LocalReady,
+        _ => _hasKey
+    };
+
+    private string ProviderStatus => _provider switch
+    {
+        AiProviderCatalog.None => "Desativada",
+        AiProviderCatalog.OllamaLocal => _probe is null
+            ? "Verificando…"
+            : !_probe.Installed
+                ? "Não instalado"
+                : !_probe.Running
+                    ? "Serviço parado"
+                    : LocalModelReady ? "Pronto" : "Modelo pendente",
+        _ => _hasKey ? "Chave salva" : "Sem chave"
+    };
+
+    private string BaseUrlPlaceholder => _provider switch
+    {
+        AiProviderCatalog.OllamaLocal => "http://localhost:11434",
+        AiProviderCatalog.OllamaCloud => "https://ollama.com",
+        AiProviderCatalog.OpenAiCompatible => "https://api.openai.com/v1",
+        _ => string.Empty
+    };
+
+    private string BaseUrlHint => _provider switch
+    {
+        AiProviderCatalog.OllamaLocal => "Deixe http://localhost:11434, a menos que use outra porta ou um Ollama em outra máquina.",
+        AiProviderCatalog.OllamaCloud => "Use https://ollama.com. A chave é criada no painel da Ollama e precisa ter créditos.",
+        AiProviderCatalog.OpenAiCompatible => "Informe a URL com /v1. Ex.: https://api.openai.com/v1 ou https://api.groq.com/openai/v1.",
+        _ => string.Empty
+    };
+
+    private string ModelHint => _provider switch
+    {
+        AiProviderCatalog.OllamaLocal => _probe?.Running == true
+            ? $"{_probe.Models.Count} modelo(s) instalado(s). A lupa lista o que já está baixado."
+            : "Inicie o Ollama para listar os modelos instalados.",
+        _ => "Use a lupa para buscar os modelos disponíveis no provedor."
+    };
+
+    private IEnumerable<string> ModelSuggestions
+    {
+        get
+        {
+            var defaults = _provider switch
+            {
+                AiProviderCatalog.OllamaLocal => AiProviderCatalog.LocalModels,
+                AiProviderCatalog.OllamaCloud => AiProviderCatalog.CloudModels,
+                AiProviderCatalog.OpenAiCompatible => AiProviderCatalog.OpenAiModels,
+                _ => Array.Empty<string>()
+            };
+            return defaults.Concat(_availableModels).Distinct(StringComparer.OrdinalIgnoreCase);
+        }
+    }
+
+    private string? KeyHelpUrl => _provider switch
+    {
+        AiProviderCatalog.OllamaCloud => "https://ollama.com/settings/keys",
+        AiProviderCatalog.OpenAiCompatible when _baseUrl.Contains("groq", StringComparison.OrdinalIgnoreCase) => "https://console.groq.com/keys",
+        AiProviderCatalog.OpenAiCompatible when _baseUrl.Contains("openrouter", StringComparison.OrdinalIgnoreCase) => "https://openrouter.ai/keys",
+        AiProviderCatalog.OpenAiCompatible => "https://platform.openai.com/api-keys",
+        _ => null
+    };
+
+    private string? KeyHelpLabel => _provider switch
+    {
+        AiProviderCatalog.OllamaCloud => "Abrir chaves do Ollama Cloud",
+        AiProviderCatalog.OpenAiCompatible when _baseUrl.Contains("groq", StringComparison.OrdinalIgnoreCase) => "Criar chave na Groq",
+        AiProviderCatalog.OpenAiCompatible when _baseUrl.Contains("openrouter", StringComparison.OrdinalIgnoreCase) => "Criar chave no OpenRouter",
+        AiProviderCatalog.OpenAiCompatible => "Criar chave na OpenAI",
+        _ => null
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        _user = await Session.GetUserAsync();
+        if (_user is null) return;
+
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        _profile = Profiles.Resolve(auth.User.FindFirst("vita_profile")?.Value) ?? Profiles.Current;
+
+        _requirements = Ollama.GetRequirements();
+        var entity = await AiSettings.GetOrCreateAsync(_user.Id);
+        _provider = string.IsNullOrWhiteSpace(entity.Provider) ? AiProviderCatalog.None : entity.Provider;
+        _baseUrl = entity.BaseUrl;
+        _model = entity.Model;
+        _temperature = entity.Temperature;
+        _jsonMode = entity.JsonMode;
+        _hasKey = !string.IsNullOrWhiteSpace(entity.ApiKeyProtected);
+
+        if (_provider == AiProviderCatalog.None)
+        {
+            _baseUrl = string.Empty;
+            _model = string.Empty;
+        }
+        else if (_provider == AiProviderCatalog.OllamaLocal)
+        {
+            if (string.IsNullOrWhiteSpace(_baseUrl)) _baseUrl = Ollama.DefaultBaseUrl;
+            if (string.IsNullOrWhiteSpace(_model)) _model = _requirements.RecommendedModel;
+            await RefreshProbeAsync();
+        }
+
+        _loading = false;
+    }
+
+    private void SetProvider(string provider)
+    {
+        _provider = provider;
+        _availableModels = new List<string>();
+        ResetTestMessages();
+        _setupMessage = null;
+        _setupLog = null;
+
+        switch (provider)
+        {
+            case AiProviderCatalog.None:
+                _baseUrl = string.Empty;
+                _model = string.Empty;
+                break;
+            case AiProviderCatalog.OllamaLocal:
+                _baseUrl = Ollama.DefaultBaseUrl;
+                _model = _requirements.RecommendedModel;
+                _ = RefreshProbeAsync();
+                break;
+            case AiProviderCatalog.OllamaCloud:
+                _baseUrl = "https://ollama.com";
+                _model = "deepseek-v4.1-flash";
+                break;
+            case AiProviderCatalog.OpenAiCompatible:
+                _baseUrl = "https://api.openai.com/v1";
+                _model = "gpt-4o-mini";
+                break;
+        }
+    }
+
+    private void ApplyPreset(AiProviderPreset preset)
+    {
+        _baseUrl = preset.BaseUrl;
+        _model = preset.Model;
+        ResetTestMessages();
+    }
+
+    private void UseRecommendedModel()
+    {
+        _model = _requirements.RecommendedModel;
+        ResetTestMessages();
+        _setupMessage = $"Modelo recomendado selecionado: {_requirements.RecommendedModelLabel} (~{_requirements.RecommendedModelGb:0.#} GB). " +
+                        "Clique em “Baixar modelo” para baixar, se ainda não estiver instalado.";
+    }
+
+    private async Task RefreshProbeAsync()
+    {
+        if (_provider != AiProviderCatalog.OllamaLocal) return;
+        _probe = await Ollama.ProbeAsync(_baseUrl);
+    }
+
+    private void SetupProgress(string line)
+    {
+        _setupLog = TextAnalysis.Truncate(line.Trim(), 200);
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    private async Task InstallOllamaAsync()
+    {
+        if (_setupBusy) return;
+        var confirmed = await JS.InvokeAsync<bool>("confirm",
+            "Instalar o Ollama automaticamente com o winget? O download tem cerca de 1 GB e pode levar alguns minutos. " +
+            "Você pode cancelar e instalar depois pelo site oficial.");
+        if (!confirmed) return;
+
+        _setupBusy = true;
+        _setupLog = "Iniciando instalação pelo winget…";
+        _setupMessage = null;
+        try
+        {
+            var (ok, message) = await Ollama.InstallAsync(SetupProgress);
+            _setupMessage = message;
+            await RefreshProbeAsync();
+            if (ok && _probe?.Running != true)
+                _setupMessage += " Se o serviço ainda não estiver ativo, clique em “Iniciar Ollama”.";
+            Toasts.Success(ok ? "Ollama instalado." : "Instalação não concluída. Veja a mensagem abaixo.");
+        }
+        finally
+        {
+            _setupBusy = false;
+        }
+    }
+
+    private async Task StartOllamaAsync()
+    {
+        if (_setupBusy) return;
+        _setupBusy = true;
+        _setupLog = "Iniciando o serviço do Ollama…";
+        _setupMessage = null;
+        try
+        {
+            var (ok, message) = await Ollama.StartAsync(_baseUrl);
+            _setupMessage = message;
+            await RefreshProbeAsync();
+            if (ok) Toasts.Success("Ollama está rodando.");
+            else Toasts.Error("Não foi possível iniciar o Ollama.");
+        }
+        finally
+        {
+            _setupBusy = false;
+        }
+    }
+
+    private async Task DownloadModelAsync()
+    {
+        if (_setupBusy) return;
+        var confirmed = await JS.InvokeAsync<bool>("confirm",
+            $"Baixar o modelo {_model}? O download pode ocupar alguns GB e levar vários minutos. " +
+            "Você pode continuar usando o app enquanto isso.");
+        if (!confirmed) return;
+
+        _setupBusy = true;
+        _setupLog = $"Baixando {_model}…";
+        _setupMessage = null;
+        try
+        {
+            var (ok, message) = await Ollama.PullModelAsync(_baseUrl, _model, SetupProgress);
+            _setupMessage = message;
+            await RefreshProbeAsync();
+            if (ok) Toasts.Success("Modelo baixado.");
+            else Toasts.Error("O download não terminou. Veja o log abaixo.");
+        }
+        finally
+        {
+            _setupBusy = false;
+        }
+    }
+
+    private async Task OpenOllamaDownload()
+    {
+        await JS.InvokeVoidAsync("open", "https://ollama.com/download/windows", "_blank");
+    }
+
+    private async Task SaveAsync()
+    {
+        if (await SaveCoreAsync(true))
+        {
+            _testOk = _provider switch
+            {
+                AiProviderCatalog.None => "Preferência salva: a IA fica desligada. Todos os recursos locais continuam disponíveis.",
+                AiProviderCatalog.OllamaLocal when LocalReady => "Configuração salva. O Ollama está pronto para uso.",
+                AiProviderCatalog.OllamaLocal => "Configuração salva. Complete os passos pendentes acima para usar o Ollama.",
+                _ => "Configuração salva. Use “Testar conexão” para confirmar a chave e o modelo."
+            };
+        }
+    }
+
+    private async Task<bool> SaveCoreAsync(bool notify)
+    {
+        if (_user is null) return false;
+        _saving = true;
+        try
+        {
+            await AiSettings.SaveAsync(_user.Id, new AiSettingsInput(
+                _provider, _baseUrl, _model,
+                string.IsNullOrWhiteSpace(_apiKey) ? null : _apiKey,
+                _temperature, _jsonMode));
+
+            _apiKey = string.Empty;
+            var entity = await AiSettings.GetOrCreateAsync(_user.Id);
+            _hasKey = !string.IsNullOrWhiteSpace(entity.ApiKeyProtected);
+            ResetTestMessages();
+
+            if (_provider == AiProviderCatalog.OllamaLocal) await RefreshProbeAsync();
+            if (notify) Toasts.Success("Configurações de IA salvas.");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _testError = "Não foi possível salvar as configurações.";
+            _testHint = ex.Message;
+            return false;
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private async Task LoadModelsAsync()
+    {
+        if (_user is null || _loadingModels) return;
+        _loadingModels = true;
+        ResetTestMessages();
+        try
+        {
+            var stored = await AiSettings.GetConfigAsync(_user.Id);
+            var key = string.IsNullOrWhiteSpace(_apiKey) ? stored.ApiKey : _apiKey;
+            var config = new AiConfig(_provider, _baseUrl, _model, key, _temperature, _jsonMode);
+            var models = await AiClient.ListModelsAsync(config);
+            _availableModels = models;
+
+            if (models.Count == 0)
+            {
+                _testHint = _provider == AiProviderCatalog.OllamaLocal
+                    ? "O Ollama não retornou modelos. Baixe um modelo no painel acima e tente de novo."
+                    : "O provedor não retornou modelos. Confira a chave e a URL base.";
+            }
+            else
+            {
+                _testOk = $"{models.Count} modelo(s) encontrado(s) em {config.DisplayName}.";
+                if (string.IsNullOrWhiteSpace(_model) ||
+                    !models.Any(m => string.Equals(m, _model, StringComparison.OrdinalIgnoreCase)))
+                    _model = models[0];
+            }
+        }
+        catch (AiException ex)
+        {
+            SetTestError(ex);
+        }
+        catch (Exception ex)
+        {
+            _testError = "Não foi possível listar os modelos.";
+            _testHint = ex.Message;
+        }
+        finally
+        {
+            _loadingModels = false;
+        }
+    }
+
+    private async Task TestAsync()
+    {
+        if (_user is null || _testing) return;
+        _testing = true;
+        ResetTestMessages();
+        try
+        {
+            if (!await SaveCoreAsync(false)) return;
+
+            if (_provider == AiProviderCatalog.None)
+            {
+                _testOk = "A IA está desativada. O app continua funcionando com os recursos locais.";
+                return;
+            }
+
+            if (_provider == AiProviderCatalog.OllamaLocal)
+            {
+                await RefreshProbeAsync();
+                if (_probe?.Running != true)
+                {
+                    _testError = "O Ollama não está respondendo.";
+                    _testHint = _probe?.Installed == true
+                        ? "Clique em “Iniciar Ollama” no painel de requisitos e tente novamente."
+                        : "Instale o Ollama no painel de requisitos ou baixe em ollama.com/download.";
+                    _testHelpUrl = "https://ollama.com/download/windows";
+                    _testHelpLabel = "Baixar Ollama";
+                    Toasts.Error("Ollama não está rodando.");
+                    return;
+                }
+
+                if (!_probe.HasModel(_model))
+                {
+                    _testError = $"O modelo {_model} ainda não está baixado.";
+                    _testHint = "Use o botão “Baixar modelo” no painel de requisitos e aguarde o download terminar.";
+                    Toasts.Error("Modelo não encontrado.");
+                    return;
+                }
+            }
+
+            var config = await AiSettings.GetConfigAsync(_user.Id);
+            var reply = await AiClient.CompleteAsync(config, new[]
+            {
+                new AiMessage("user", "Responda somente com a palavra OK, sem pontuação.")
+            });
+            _testOk = $"Conexão bem-sucedida com {config.DisplayName} · modelo {config.Model}. Resposta: {TextAnalysis.Truncate(reply.Trim(), 80)}";
+            Toasts.Success("Provedor de IA respondeu.");
+        }
+        catch (AiException ex)
+        {
+            SetTestError(ex);
+            Toasts.Error("Não foi possível testar o provedor.");
+        }
+        catch (Exception ex)
+        {
+            _testError = "Falha inesperada ao testar o provedor.";
+            _testHint = ex.Message;
+            Toasts.Error("Falha ao testar o provedor.");
+        }
+        finally
+        {
+            _testing = false;
+        }
+    }
+
+    private void SetTestError(AiException ex)
+    {
+        _testError = ex.Message;
+        _testHint = ex.Hint;
+        _testHelpUrl = ex.HelpUrl;
+        _testHelpLabel = ex.HelpLabel;
+    }
+
+    private void ResetTestMessages()
+    {
+        _testOk = null;
+        _testError = null;
+        _testHint = null;
+        _testHelpUrl = null;
+        _testHelpLabel = null;
+    }
+
+    private async Task ClearKey()
+    {
+        if (_user is null) return;
+        await AiSettings.SaveAsync(_user.Id, new AiSettingsInput(_provider, _baseUrl, _model, null, _temperature, _jsonMode, ClearApiKey: true));
+        _hasKey = false;
+        _apiKey = string.Empty;
+        ResetTestMessages();
+        Toasts.Info("Chave de API removida.");
+    }
+
+    private async Task Logout()
+    {
+        await JS.InvokeVoidAsync("vita.logout");
+    }
+
+    private async Task OpenProfileFolder()
+    {
+        await JS.InvokeVoidAsync("vita.openProfileFolder");
+    }
+
+    private async Task ShutdownAsync()
+    {
+        var confirmed = await JS.InvokeAsync<bool>("confirm", "Encerrar a Vita agora? Seus dados já estão salvos.");
+        if (!confirmed) return;
+
+        _shuttingDown = true;
+        StateHasChanged();
+        await Task.Delay(600);
+        Lifetime.StopApplication();
+    }
+
+    private static string Initials(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return "V";
+        var parts = name.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        return parts.Length == 1
+            ? parts[0][..1].ToUpperInvariant()
+            : (parts[0][..1] + parts[^1][..1]).ToUpperInvariant();
+    }
+
+    private static string LanguageName(string code) => code switch
+    {
+        "en" => "English",
+        "es" => "Español",
+        _ => "Português"
+    };
+}

@@ -1,0 +1,11 @@
+E:\Projetonovo\vita\src\Vita.Core\bin\Release\net10.0\Vita.Core.deps.json
+E:\Projetonovo\vita\src\Vita.Core\bin\Release\net10.0\Vita.Core.dll
+E:\Projetonovo\vita\src\Vita.Core\obj\Release\net10.0\Vita.Core.GeneratedMSBuildEditorConfig.editorconfig
+E:\Projetonovo\vita\src\Vita.Core\obj\Release\net10.0\Vita.Core.AssemblyInfoInputs.cache
+E:\Projetonovo\vita\src\Vita.Core\obj\Release\net10.0\Vita.Core.AssemblyInfo.cs
+E:\Projetonovo\vita\src\Vita.Core\obj\Release\net10.0\Vita.Core.csproj.CoreCompileInputs.cache
+E:\Projetonovo\vita\src\Vita.Core\obj\Release\net10.0\Vita.Core.dll
+E:\Projetonovo\vita\src\Vita.Core\obj\Release\net10.0\refint\Vita.Core.dll
+E:\Projetonovo\vita\src\Vita.Core\obj\Release\net10.0\ref\Vita.Core.dll
+E:\Projetonovo\vita\src\Vita.Core\bin\Release\net10.0\Vita.Core.pdb
+E:\Projetonovo\vita\src\Vita.Core\obj\Release\net10.0\Vita.Core.pdb

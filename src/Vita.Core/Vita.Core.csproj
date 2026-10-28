@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>Vita.Core</RootNamespace>
+    <AssemblyName>Vita.Core</AssemblyName>
+  </PropertyGroup>
+</Project>

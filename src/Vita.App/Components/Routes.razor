@@ -1,0 +1,23 @@
+@using Vita.App.Components.Shared
+<Router AppAssembly="typeof(Program).Assembly">
+    <Found Context="routeData">
+        <AuthorizeRouteView RouteData="routeData" DefaultLayout="typeof(MainLayout)">
+            <NotAuthorized>
+                <RedirectToLogin />
+            </NotAuthorized>
+            <Authorizing>
+                <div class="page-loader"><span class="spinner"></span></div>
+            </Authorizing>
+        </AuthorizeRouteView>
+    </Found>
+    <NotFound>
+        <LayoutView Layout="typeof(MainLayout)">
+            <div class="empty-page">
+                <div class="empty-page-code">404</div>
+                <h1>Página não encontrada</h1>
+                <p>O endereço que você tentou abrir não existe.</p>
+                <a class="btn btn-primary" href="/">Voltar ao início</a>
+            </div>
+        </LayoutView>
+    </NotFound>
+</Router>

@@ -1,0 +1,440 @@
+@page "/applications"
+@attribute [Authorize]
+@inject UserSession Session
+@inject ApplicationStore AppStore
+@inject ResumeStore ResumeStore
+@inject ToastService Toasts
+@inject NavigationManager Nav
+
+<PageTitle>Candidaturas · Vita</PageTitle>
+
+<div class="page-head">
+    <div class="page-head-main">
+        <span class="eyebrow"><span class="dot"></span> Seu pipeline</span>
+        <h1 class="page-title">Candidaturas <em>em movimento</em></h1>
+        <p class="page-sub">Arraste os cartões para mudar o status. Registre próximos passos, notas e mantenha o contexto de cada conversa.</p>
+    </div>
+    <div class="page-actions">
+        <div class="filter-input">
+            <Icon Name="search" Size="15" />
+            <input @bind="_filter" @bind:event="oninput" placeholder="Filtrar por empresa ou cargo" />
+        </div>
+        <button class="btn btn-primary" @onclick="() => OpenNew(ApplicationStatuses.Saved)">
+            <Icon Name="plus" Size="16" /> Nova candidatura
+        </button>
+    </div>
+</div>
+
+@if (_loading)
+{
+    <div class="page-loader"><span class="spinner"></span></div>
+}
+else
+{
+    <div class="pipeline-metrics">
+        <div class="metric">
+            <span class="metric-label">No pipeline</span>
+            <span class="metric-value">@_items.Count(a => a.Status != ApplicationStatuses.Rejected)</span>
+            <span class="metric-foot">candidaturas ativas</span>
+        </div>
+        <div class="metric">
+            <span class="metric-label">Entrevistas</span>
+            <span class="metric-value">@_items.Count(a => a.Status == ApplicationStatuses.Interview)</span>
+            <span class="metric-foot">em andamento</span>
+        </div>
+        <div class="metric">
+            <span class="metric-label">Propostas</span>
+            <span class="metric-value">@_items.Count(a => a.Status == ApplicationStatuses.Offer)</span>
+            <span class="metric-foot">recebidas</span>
+        </div>
+        <div class="metric">
+            <span class="metric-label">Resposta</span>
+            <span class="metric-value">@_responseRate%</span>
+            <span class="metric-foot">das aplicações</span>
+        </div>
+    </div>
+
+    <div class="kanban">
+        @foreach (var status in ApplicationStatuses.All)
+        {
+            var columnItems = Filtered(status);
+            <section class="kanban-col @(_dragOverStatus == status ? "drag-over" : "")"
+                     @ondragover="() => OnDragOver(status)" @ondragover:preventDefault
+                     @ondragleave="() => OnDragLeave(status)"
+                     @ondrop="() => OnDrop(status)" @ondrop:preventDefault>
+                <header class="kanban-head">
+                    <span class="stage-dot" style="background:@StatusColor(status)"></span>
+                    <strong>@ApplicationStatuses.Label(status)</strong>
+                    <span class="count">@columnItems.Count</span>
+                </header>
+
+                @foreach (var app in columnItems)
+                {
+                    <article class="kanban-card @(_draggingId == app.Id ? "dragging" : "")"
+                             draggable="true"
+                             @ondragstart="() => StartDrag(app.Id)"
+                             @ondragend="EndDrag"
+                             @onclick="() => OpenEdit(app)">
+                        <div class="row-between" style="align-items:flex-start;gap:7px">
+                            <div style="min-width:0">
+                                <h4>@app.Position</h4>
+                                <div class="company">@app.Company</div>
+                            </div>
+                            @if (app.MatchScore > 0)
+                            {
+                                <span class="score-pill @MatchTone(app.MatchScore)">@app.MatchScore%</span>
+                            }
+                        </div>
+                        <div class="kanban-meta">
+                            @if (!string.IsNullOrWhiteSpace(app.Location))
+                            {
+                                <span class="tiny muted"><Icon Name="pin" Size="11" /> @app.Location</span>
+                            }
+                            @if (app.NextStepAt is { } next)
+                            {
+                                <span class="badge @NextStepTone(next) badge-dot">@NextStepLabel(next)</span>
+                            }
+                        </div>
+                        @if (!string.IsNullOrWhiteSpace(app.Notes))
+                        {
+                            <p class="kanban-note">@TextAnalysis.Truncate(app.Notes, 90)</p>
+                        }
+                    </article>
+                }
+
+                @if (columnItems.Count == 0)
+                {
+                    <div class="kanban-empty">Solte um cartão aqui ou adicione uma candidatura.</div>
+                }
+
+                <button class="kanban-add" @onclick="() => OpenNew(status)">
+                    <Icon Name="plus" Size="13" /> Adicionar
+                </button>
+            </section>
+        }
+    </div>
+
+    @if (_items.Count == 0)
+    {
+        <div class="empty-state" style="margin-top:18px">
+            <div class="orb"><Icon Name="columns" Size="22" /></div>
+            <h3>Seu pipeline começa aqui.</h3>
+            <p>Adicione uma candidatura manualmente ou salve vagas na busca para acompanhar cada etapa.</p>
+            <div class="row-wrap" style="justify-content:center">
+                <button class="btn btn-primary" @onclick="() => OpenNew(ApplicationStatuses.Saved)"><Icon Name="plus" Size="16" /> Adicionar candidatura</button>
+                <a class="btn btn-ghost" href="/jobs"><Icon Name="briefcase" Size="16" /> Buscar vagas</a>
+            </div>
+        </div>
+    }
+}
+
+<Modal Open="_editOpen" Title="@(_isNew ? "Nova candidatura" : "Editar candidatura")"
+       Subtitle="@(_isNew ? "Registre a vaga e acompanhe cada etapa do processo." : "Atualize status, próximos passos e anotações.")"
+       OnClose="CloseEdit" Size="lg">
+    <ChildContent>
+        @if (_edit is not null)
+        {
+            <div class="form-grid">
+                <label class="field">
+                    <span>Empresa</span>
+                    <input @bind="_edit.Company" placeholder="Ex.: Nubank" />
+                </label>
+                <label class="field">
+                    <span>Cargo</span>
+                    <input @bind="_edit.Position" placeholder="Ex.: Product Designer Sênior" />
+                </label>
+                <label class="field">
+                    <span>Localização</span>
+                    <input @bind="_edit.Location" placeholder="São Paulo, SP · Remoto" />
+                </label>
+                <label class="field">
+                    <span>Faixa salarial</span>
+                    <input @bind="_edit.SalaryRange" placeholder="Ex.: R$ 12.000 – 16.000" />
+                </label>
+                <label class="field">
+                    <span>Status</span>
+                    <select class="select" @bind="_edit.Status">
+                        @foreach (var status in ApplicationStatuses.All)
+                        {
+                            <option value="@status">@ApplicationStatuses.Label(status)</option>
+                        }
+                    </select>
+                </label>
+                <label class="field">
+                    <span>Próximo passo</span>
+                    <input type="date" value="@_nextStepText" @onchange="OnNextStepChange" />
+                </label>
+                <label class="field span-2">
+                    <span>Link da vaga</span>
+                    <input @bind="_edit.Url" placeholder="https://..." />
+                </label>
+                <label class="field span-2">
+                    <span>Notas</span>
+                    <textarea class="textarea" rows="3" @bind="_edit.Notes" placeholder="Contato do recrutador, impressões, perguntas para a entrevista…"></textarea>
+                </label>
+                <label class="field span-2">
+                    <span>Descrição da vaga</span>
+                    <textarea class="textarea" rows="4" @bind="_edit.JobDescription" placeholder="Cole a descrição para usar na adaptação do currículo e na carta."></textarea>
+                </label>
+            </div>
+
+            @if (!_isNew)
+            {
+                <div class="row-wrap">
+                    @if (_edit.ResumeId is { } resumeId)
+                    {
+                        <button class="btn btn-ghost btn-sm" @onclick="() => TailorCurrent(resumeId)">
+                            <Icon Name="wand" Size="14" /> Adaptar currículo
+                        </button>
+                    }
+                    else
+                    {
+                        <span class="tiny muted"><Icon Name="info" Size="12" /> Selecione um currículo na adaptação para vincular esta vaga.</span>
+                    }
+                    <button class="btn btn-ghost btn-sm" @onclick="() => GenerateLetter()">
+                        <Icon Name="mail" Size="14" /> Gerar carta
+                    </button>
+                    @if (!string.IsNullOrWhiteSpace(_edit.Url))
+                    {
+                        <a class="btn btn-ghost btn-sm" href="@_edit.Url" target="_blank" rel="noopener">
+                            <Icon Name="external" Size="14" /> Abrir vaga
+                        </a>
+                    }
+                </div>
+            }
+        }
+    </ChildContent>
+    <Footer>
+        @if (!_isNew)
+        {
+            <button class="btn btn-danger-ghost" @onclick="AskDelete"><Icon Name="trash" Size="14" /> Excluir</button>
+        }
+        <div class="spacer"></div>
+        <button class="btn btn-ghost" @onclick="CloseEdit">Cancelar</button>
+        <button class="btn btn-primary" @onclick="SaveEdit" disabled="@_saving">
+            @if (_saving) { <span class="spinner spinner-sm"></span> }
+            Salvar
+        </button>
+    </Footer>
+</Modal>
+
+<Modal Open="_deleteOpen" Title="Excluir candidatura?" Subtitle="O histórico desta candidatura será removido do seu pipeline." OnClose="() => _deleteOpen = false">
+    <ChildContent>
+        @if (_deleteTarget is not null)
+        {
+            <div class="alert alert-warn">
+                <Icon Name="alert" Size="17" />
+                <span><strong>@_deleteTarget.Position</strong> na <strong>@_deleteTarget.Company</strong> será removida. Essa ação não pode ser desfeita.</span>
+            </div>
+        }
+    </ChildContent>
+    <Footer>
+        <button class="btn btn-ghost" @onclick="() => _deleteOpen = false">Cancelar</button>
+        <button class="btn btn-danger" @onclick="DeleteCurrent">Excluir definitivamente</button>
+    </Footer>
+</Modal>
+
+@code {
+    private AppUser? _user;
+    private List<ApplicationEntity> _items = new();
+    private List<ResumeEntity> _resumes = new();
+    private bool _loading = true;
+    private bool _saving;
+    private string _filter = string.Empty;
+
+    private bool _editOpen, _deleteOpen, _isNew;
+    private ApplicationEntity? _edit;
+    private ApplicationEntity? _deleteTarget;
+    private string _nextStepText = string.Empty;
+
+    private Guid? _draggingId;
+    private string? _dragOverStatus;
+
+    private int _responseRate
+    {
+        get
+        {
+            var applied = _items.Count(a => a.AppliedAt is not null || a.Status != ApplicationStatuses.Saved);
+            if (applied == 0) return 0;
+            var responded = _items.Count(a => a.Status is ApplicationStatuses.Interview or ApplicationStatuses.Offer);
+            return (int)Math.Round(100.0 * responded / applied);
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        _user = await Session.GetUserAsync();
+        if (_user is null) return;
+        _resumes = await ResumeStore.ListAsync(_user.Id);
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        if (_user is null) return;
+        _loading = true;
+        _items = await AppStore.ListAsync(_user.Id);
+        _loading = false;
+    }
+
+    private List<ApplicationEntity> Filtered(string status)
+    {
+        var items = _items.Where(a => a.Status == status);
+        if (!string.IsNullOrWhiteSpace(_filter))
+        {
+            var term = _filter.Trim();
+            items = items.Where(a =>
+                TextAnalysis.ContainsKeyword(a.Company, term) ||
+                TextAnalysis.ContainsKeyword(a.Position, term) ||
+                TextAnalysis.ContainsKeyword(a.Location, term));
+        }
+        return items.OrderByDescending(a => a.UpdatedAt).ToList();
+    }
+
+    private void OpenNew(string status)
+    {
+        _isNew = true;
+        _edit = new ApplicationEntity
+        {
+            UserId = _user?.Id ?? Guid.Empty,
+            Status = status,
+            Source = "Manual",
+            ResumeId = _resumes.FirstOrDefault(r => r.IsDefault)?.Id ?? _resumes.FirstOrDefault()?.Id
+        };
+        _nextStepText = string.Empty;
+        _editOpen = true;
+    }
+
+    private void OpenEdit(ApplicationEntity app)
+    {
+        _isNew = false;
+        _edit = app;
+        _nextStepText = app.NextStepAt?.ToString("yyyy-MM-dd") ?? string.Empty;
+        _editOpen = true;
+    }
+
+    private void CloseEdit()
+    {
+        _editOpen = false;
+        _edit = null;
+    }
+
+    private async Task SaveEdit()
+    {
+        if (_user is null || _edit is null) return;
+        if (string.IsNullOrWhiteSpace(_edit.Company) || string.IsNullOrWhiteSpace(_edit.Position))
+        {
+            Toasts.Error("Preencha empresa e cargo para salvar.");
+            return;
+        }
+        _saving = true;
+        try
+        {
+            _edit.NextStepAt = DateTime.TryParse(_nextStepText, out var next) ? next.Date : null;
+            if (_edit.Status is ApplicationStatuses.Applied or ApplicationStatuses.Interview or ApplicationStatuses.Offer && _edit.AppliedAt is null)
+                _edit.AppliedAt = DateTime.UtcNow;
+            await AppStore.SaveAsync(_edit);
+            _editOpen = false;
+            _edit = null;
+            await LoadAsync();
+            Toasts.Success(_isNew ? "Candidatura adicionada ao pipeline." : "Candidatura atualizada.");
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private void AskDelete()
+    {
+        _deleteTarget = _edit;
+        _editOpen = false;
+        _deleteOpen = true;
+    }
+
+    private async Task DeleteCurrent()
+    {
+        if (_user is null || _deleteTarget is null) return;
+        await AppStore.DeleteAsync(_deleteTarget.Id, _user.Id);
+        _deleteOpen = false;
+        _deleteTarget = null;
+        _editOpen = false;
+        _edit = null;
+        await LoadAsync();
+        Toasts.Success("Candidatura excluída.");
+    }
+
+    private void OnNextStepChange(ChangeEventArgs args) => _nextStepText = args.Value?.ToString() ?? string.Empty;
+
+    private void StartDrag(Guid id) => _draggingId = id;
+
+    private void EndDrag()
+    {
+        _draggingId = null;
+        _dragOverStatus = null;
+    }
+
+    private void OnDragOver(string status) => _dragOverStatus = status;
+
+    private void OnDragLeave(string status)
+    {
+        if (_dragOverStatus == status) _dragOverStatus = null;
+    }
+
+    private async Task OnDrop(string status)
+    {
+        var id = _draggingId;
+        _draggingId = null;
+        _dragOverStatus = null;
+        if (id is null) return;
+
+        var app = _items.FirstOrDefault(a => a.Id == id);
+        if (app is null || app.Status == status) return;
+
+        app.Status = status;
+        if (status is ApplicationStatuses.Applied or ApplicationStatuses.Interview or ApplicationStatuses.Offer && app.AppliedAt is null)
+            app.AppliedAt = DateTime.UtcNow;
+        await AppStore.SaveAsync(app);
+        await LoadAsync();
+        Toasts.Success($"Movida para {ApplicationStatuses.Label(status)}.");
+    }
+
+    private void TailorCurrent(Guid resumeId)
+    {
+        if (_edit is null) return;
+        var jobText = TextAnalysis.Truncate(_edit.JobDescription, 1400);
+        Nav.NavigateTo($"/resumes/{resumeId}/edit?tailor=1&role={Uri.EscapeDataString(_edit.Position)}&company={Uri.EscapeDataString(_edit.Company)}&job={Uri.EscapeDataString(jobText)}");
+    }
+
+    private void GenerateLetter()
+    {
+        if (_edit is null) return;
+        Nav.NavigateTo($"/cover-letters?company={Uri.EscapeDataString(_edit.Company)}&role={Uri.EscapeDataString(_edit.Position)}");
+    }
+
+    private static string MatchTone(int score) => score >= 80 ? "" : score >= 60 ? "warn" : "bad";
+
+    private static string StatusColor(string status) => status switch
+    {
+        ApplicationStatuses.Applied => "#3C7FA6",
+        ApplicationStatuses.Interview => "#D99A34",
+        ApplicationStatuses.Offer => "#1E6B57",
+        ApplicationStatuses.Rejected => "#BE5430",
+        _ => "#9C978B"
+    };
+
+    private static string NextStepLabel(DateTime value)
+    {
+        var days = (value.Date - DateTime.Today).Days;
+        return days switch
+        {
+            < 0 => "atrasado",
+            0 => "hoje",
+            1 => "amanhã",
+            _ => $"em {days} dias"
+        };
+    }
+
+    private static string NextStepTone(DateTime value) =>
+        value.Date < DateTime.Today ? "badge-clay" : value.Date == DateTime.Today ? "badge-sun" : "badge-outline";
+}
